@@ -188,3 +188,4 @@ create policy "Users can insert own recommendations" on public.recommendations
 
 create policy "Users can delete own recommendations" on public.recommendations
   for delete using (auth.uid() = user_id);
+

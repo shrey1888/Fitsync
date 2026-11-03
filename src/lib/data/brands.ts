@@ -533,3 +533,4 @@ export const SIZE_CHARTS: SizeChart[] = [
     ],
   },
 ];
+

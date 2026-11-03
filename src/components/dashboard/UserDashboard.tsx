@@ -497,3 +497,4 @@ CREATE POLICY "Users can access own measurements"
     </div>
   );
 }
+
