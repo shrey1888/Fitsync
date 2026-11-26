@@ -87,83 +87,90 @@ export function useFitSync() {
 
   // Initialize from LocalStorage and/or Supabase
   useEffect(() => {
-    try {
-      const storedMeas = localStorage.getItem(STORAGE_KEYS.MEASUREMENTS);
-      if (storedMeas) {
-        setMeasurementsState(JSON.parse(storedMeas));
-      } else {
-        // Pre-populate with the prompt's reference profile so the user gets an instant wow factor!
-        const defaultProfile = SAMPLE_PROFILES[0].measurements;
-        setMeasurementsState(defaultProfile);
-        localStorage.setItem(STORAGE_KEYS.MEASUREMENTS, JSON.stringify(defaultProfile));
-      }
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      try {
+        const storedMeas = localStorage.getItem(STORAGE_KEYS.MEASUREMENTS);
+        if (storedMeas) {
+          setMeasurementsState(JSON.parse(storedMeas));
+        } else {
+          // Pre-populate with the prompt's reference profile so the user gets an instant wow factor!
+          const defaultProfile = SAMPLE_PROFILES[0].measurements;
+          setMeasurementsState(defaultProfile);
+          localStorage.setItem(STORAGE_KEYS.MEASUREMENTS, JSON.stringify(defaultProfile));
+        }
 
-      const storedSaved = localStorage.getItem(STORAGE_KEYS.SAVED_BRANDS);
-      if (storedSaved) {
-        setSavedBrandsState(JSON.parse(storedSaved));
-      }
+        const storedSaved = localStorage.getItem(STORAGE_KEYS.SAVED_BRANDS);
+        if (storedSaved) {
+          setSavedBrandsState(JSON.parse(storedSaved));
+        }
 
-      const storedRecent = localStorage.getItem(STORAGE_KEYS.RECENT_BRANDS);
-      if (storedRecent) {
-        setRecentBrandsState(JSON.parse(storedRecent));
-      }
+        const storedRecent = localStorage.getItem(STORAGE_KEYS.RECENT_BRANDS);
+        if (storedRecent) {
+          setRecentBrandsState(JSON.parse(storedRecent));
+        }
 
-      const storedHist = localStorage.getItem(STORAGE_KEYS.HISTORY);
-      if (storedHist) {
-        setHistoryState(JSON.parse(storedHist));
-      } else {
-        // Initial sample history
-        const initialHist: SavedRecommendation[] = [
-          {
-            id: 'rec-1',
-            brandId: 'zara',
-            brandName: 'Zara',
-            category: 'tops',
-            recommendedSize: 'M',
-            confidenceLevel: 'High',
-            confidenceScore: 96,
-            createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-          },
-          {
-            id: 'rec-2',
-            brandId: 'hm',
-            brandName: 'H&M',
-            category: 'tops',
-            recommendedSize: 'L',
-            confidenceLevel: 'High',
-            confidenceScore: 92,
-            createdAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-          },
-          {
-            id: 'rec-3',
-            brandId: 'uniqlo',
-            brandName: 'Uniqlo',
-            category: 'tops',
-            recommendedSize: 'M',
-            confidenceLevel: 'High',
-            confidenceScore: 95,
-            createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-          },
-          {
-            id: 'rec-4',
-            brandId: 'levis',
-            brandName: "Levi's",
-            category: 'bottoms',
-            recommendedSize: '32',
-            confidenceLevel: 'High',
-            confidenceScore: 98,
-            createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
-          },
-        ];
-        setHistoryState(initialHist);
-        localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(initialHist));
+        const storedHist = localStorage.getItem(STORAGE_KEYS.HISTORY);
+        if (storedHist) {
+          setHistoryState(JSON.parse(storedHist));
+        } else {
+          // Initial sample history
+          const initialHist: SavedRecommendation[] = [
+            {
+              id: 'rec-1',
+              brandId: 'zara',
+              brandName: 'Zara',
+              category: 'tops',
+              recommendedSize: 'M',
+              confidenceLevel: 'High',
+              confidenceScore: 96,
+              createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+            },
+            {
+              id: 'rec-2',
+              brandId: 'hm',
+              brandName: 'H&M',
+              category: 'tops',
+              recommendedSize: 'L',
+              confidenceLevel: 'High',
+              confidenceScore: 92,
+              createdAt: new Date(Date.now() - 3600000 * 6).toISOString(),
+            },
+            {
+              id: 'rec-3',
+              brandId: 'uniqlo',
+              brandName: 'Uniqlo',
+              category: 'tops',
+              recommendedSize: 'M',
+              confidenceLevel: 'High',
+              confidenceScore: 95,
+              createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+            },
+            {
+              id: 'rec-4',
+              brandId: 'levis',
+              brandName: "Levi's",
+              category: 'bottoms',
+              recommendedSize: '32',
+              confidenceLevel: 'High',
+              confidenceScore: 98,
+              createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
+            },
+          ];
+          setHistoryState(initialHist);
+          localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(initialHist));
+        }
+      } catch {
+        // Fallback
+        setMeasurementsState(SAMPLE_PROFILES[0].measurements);
+      } finally {
+        setIsLoaded(true);
       }
-    } catch {
-      // Fallback
-      setMeasurementsState(SAMPLE_PROFILES[0].measurements);
-    } finally {
-      setIsLoaded(true);
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const saveMeasurements = async (newMeasurements: BodyMeasurements) => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BRANDS, PRODUCTS } from '@/lib/data/brands';
@@ -38,7 +38,9 @@ export default function SizeFinder() {
   } = useFitSync();
 
   // Selections
-  const [selectedBrandId, setSelectedBrandId] = useState<string>(urlBrand || 'zara');
+  const initialBrandId =
+    urlBrand && BRANDS.some((b) => b.id === urlBrand) ? urlBrand : 'zara';
+  const [selectedBrandId, setSelectedBrandId] = useState<string>(initialBrandId);
   const [selectedCategory, setSelectedCategory] = useState<ClothingCategory>(
     urlCategory || 'tops'
   );
@@ -46,25 +48,24 @@ export default function SizeFinder() {
   const [copied, setCopied] = useState(false);
   const [hasSavedToHistory, setHasSavedToHistory] = useState(false);
 
-  // Sync with URL parameters if user navigated from brand page
-  useEffect(() => {
-    if (urlBrand && BRANDS.some((b) => b.id === urlBrand)) {
-      setSelectedBrandId(urlBrand);
-    }
-  }, [urlBrand]);
-
-  // When brand changes, check if category is supported
   const currentBrand = BRANDS.find((b) => b.id === selectedBrandId) || BRANDS[0];
 
-  useEffect(() => {
-    if (!currentBrand.categories.includes(selectedCategory)) {
-      setSelectedCategory(currentBrand.categories[0] || 'tops');
+  const handleSelectBrand = (brandId: string) => {
+    setSelectedBrandId(brandId);
+    const nextBrand = BRANDS.find((b) => b.id === brandId) || BRANDS[0];
+    if (!nextBrand.categories.includes(selectedCategory)) {
+      setSelectedCategory(nextBrand.categories[0] || 'tops');
     }
-    // Reset product selection when brand or category changes
     setSelectedProductId('');
     setHasSavedToHistory(false);
-    recordBrandVisit(selectedBrandId);
-  }, [selectedBrandId]);
+    recordBrandVisit(brandId);
+  };
+
+  const handleSelectCategory = (category: ClothingCategory) => {
+    setSelectedCategory(category);
+    setSelectedProductId('');
+    setHasSavedToHistory(false);
+  };
 
   // Products available for this brand and category
   const availableProducts = PRODUCTS.filter(
@@ -167,7 +168,7 @@ export default function SizeFinder() {
               <button
                 key={brand.id}
                 type="button"
-                onClick={() => setSelectedBrandId(brand.id)}
+                onClick={() => handleSelectBrand(brand.id)}
                 className={`p-3 text-center border transition-all flex flex-col items-center justify-center ${
                   selectedBrandId === brand.id
                     ? 'border-[#121212] bg-[#121212] text-white shadow-xs'
@@ -205,7 +206,7 @@ export default function SizeFinder() {
                 <button
                   key={cat.id}
                   disabled={!isSupported}
-                  onClick={() => setSelectedCategory(cat.id as ClothingCategory)}
+                  onClick={() => handleSelectCategory(cat.id as ClothingCategory)}
                   className={`px-4 py-2.5 text-xs uppercase tracking-wider border transition-all text-left ${
                     selectedCategory === cat.id
                       ? 'border-[#121212] bg-[#121212] text-white'
