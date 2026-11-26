@@ -2,24 +2,18 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useFitSync, SAMPLE_PROFILES } from '@/lib/store/useFitStore';
-import { BRANDS, PRODUCTS } from '@/lib/data/brands';
-import { ClothingCategory, BodyMeasurements } from '@/lib/types';
-import { recommendSize, batchRecommendSizes } from '@/lib/sizing/engine';
+import { useFitSync, DEFAULT_MEASUREMENTS } from '@/lib/store/useFitStore';
+import { BRANDS } from '@/lib/data/brands';
+import { ClothingCategory, BodyMeasurements, RecommendationResult } from '@/lib/types';
+import { recommendSize } from '@/lib/sizing/engine';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
 import {
-  Ruler,
   Sliders,
   Bookmark,
   History,
-  ShieldCheck,
-  Sparkles,
-  ExternalLink,
   ArrowRight,
   Database,
-  CheckCircle2,
   Lock,
-  Layers,
   Trash2,
   Copy,
   Check,
@@ -27,45 +21,24 @@ import {
 import { motion } from 'framer-motion';
 
 export default function UserDashboard() {
-  const {
-    measurements,
-    saveMeasurements,
-    savedBrands,
-    toggleSaveBrand,
-    recentBrands,
-    history,
-  } = useFitSync();
+  const { measurements, isLoaded, savedBrands, toggleSaveBrand, history } = useFitSync();
 
   const [activeMatrixCategory, setActiveMatrixCategory] = useState<ClothingCategory>('tops');
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
-  const activeMeasurements: BodyMeasurements = measurements || {
-    height: 175,
-    weight: 72,
-    chest: 96,
-    waist: 82,
-    shoulder: 44,
-    hip: 98,
-    inseam: 80,
-    gender: 'menswear',
-    fitPreference: 'regular',
-    unit: 'cm',
-  };
+  const activeMeasurements: BodyMeasurements = measurements ?? DEFAULT_MEASUREMENTS;
 
-  // Compute Universal Matrix recommendations for all 8 brands
-  const matrixRecommendations = BRANDS.map((brand) => {
-    // Check if category is supported by brand
-    const categoryToUse = brand.categories.includes(activeMatrixCategory)
-      ? activeMatrixCategory
-      : brand.categories[0];
-
-    return recommendSize({
-      brandId: brand.id,
-      category: categoryToUse,
-      measurements: activeMeasurements,
-    });
-  });
+  // Compute Universal Matrix recommendations for every brand that sells the category
+  const matrixRecommendations = BRANDS.filter((brand) => brand.categories.includes(activeMatrixCategory))
+    .map((brand) =>
+      recommendSize({
+        brandId: brand.id,
+        category: activeMatrixCategory,
+        measurements: activeMeasurements,
+      })
+    )
+    .filter((rec): rec is RecommendationResult => rec !== null);
 
   const sqlSchemaSnippet = `-- Supabase RLS Schema for FITSYNC
 CREATE TABLE public.body_measurements (
@@ -88,11 +61,24 @@ CREATE POLICY "Users can access own measurements"
   ON public.body_measurements FOR ALL
   USING (auth.uid() = user_id);`;
 
-  const copySql = () => {
-    navigator.clipboard.writeText(sqlSchemaSnippet);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2000);
+  const copySql = async () => {
+    try {
+      await navigator.clipboard.writeText(sqlSchemaSnippet);
+      setCopiedSql(true);
+      setTimeout(() => setCopiedSql(false), 2000);
+    } catch {
+      // Clipboard API unavailable (non-secure origin); the SQL block is selectable instead.
+    }
   };
+
+  if (!isLoaded) {
+    return (
+      <div className="max-w-6xl mx-auto py-20 text-center space-y-4">
+        <div className="w-8 h-8 border-2 border-[#121212] border-t-transparent rounded-full animate-spin mx-auto" />
+        <span className="font-mono text-xs uppercase tracking-widest text-[#6E6D68]">Loading your profile...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-12 max-w-6xl mx-auto">
@@ -255,6 +241,7 @@ CREATE POLICY "Users can access own measurements"
                     <button
                       type="button"
                       onClick={() => toggleSaveBrand(rec.brand.id)}
+                      aria-label={isSaved ? `Remove ${rec.brand.name} from saved` : `Save ${rec.brand.name}`}
                       className="text-[#9B9A93] hover:text-[#121212]"
                     >
                       <Bookmark className={`w-3.5 h-3.5 ${isSaved ? 'fill-current text-[#121212]' : ''}`} />
@@ -273,6 +260,9 @@ CREATE POLICY "Users can access own measurements"
                       </span>
                       <span className="font-serif text-4xl font-black text-[#121212]">
                         {rec.recommendedSize}
+                        {rec.recommendedLength && (
+                          <span className="text-base font-bold text-[#6E6D68] ml-1">×L{rec.recommendedLength}</span>
+                        )}
                       </span>
                     </div>
 
@@ -297,7 +287,7 @@ CREATE POLICY "Users can access own measurements"
                     {rec.fitAssessment}
                   </span>
                   <Link
-                    href={`/finder?brand=${rec.brand.id}&category=${activeMatrixCategory}`}
+                    href={`/finder?brand=${rec.brand.id}&category=${rec.category}`}
                     className="text-[11px] uppercase tracking-wider text-[#121212] font-semibold hover:text-[#9F8253] inline-flex items-center"
                   >
                     Details <ArrowRight className="w-3 h-3 ml-1" />
@@ -324,6 +314,11 @@ CREATE POLICY "Users can access own measurements"
             </div>
 
             <div className="space-y-2">
+              {savedBrands.length === 0 && (
+                <p className="text-xs text-[#6E6D68] py-4 text-center">
+                  No saved brands yet. Tap the bookmark on any brand card to keep it here.
+                </p>
+              )}
               {savedBrands.map((bId) => {
                 const b = BRANDS.find((brand) => brand.id === bId);
                 if (!b) return null;
@@ -349,6 +344,7 @@ CREATE POLICY "Users can access own measurements"
                       <button
                         type="button"
                         onClick={() => toggleSaveBrand(b.id)}
+                        aria-label={`Remove ${b.name} from saved`}
                         className="text-[#9B9A93] hover:text-[#121212] p-1"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -391,7 +387,7 @@ CREATE POLICY "Users can access own measurements"
                       <span className="font-serif font-bold text-sm text-[#121212]">
                         {item.brandName}
                       </span>
-                      <span className="text-[10px] font-mono uppercase px-1.5 py-0.2 bg-[#F0EFEB] text-[#6E6D68]">
+                      <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 bg-[#F0EFEB] text-[#6E6D68]">
                         {item.category}
                       </span>
                       {item.productName && (

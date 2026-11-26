@@ -80,6 +80,8 @@ export interface SizeChart {
   isVerified: boolean;
   sourceNote: string;
   entries: SizeChartEntry[];
+  /** Denim-style charts sell each waist size in several leg lengths (e.g. Levi's W32 L30/L32/L34). */
+  lengthOptions?: { label: string; inseam: number }[];
 }
 
 export interface DimensionBreakdown {
@@ -114,6 +116,12 @@ export interface RecommendationResult {
   dimensionBreakdowns: DimensionBreakdown[];
   missingMeasurementsNotice?: string[];
   isProductSpecificData: boolean;
+  /** Recommended leg length label for charts with lengthOptions (e.g. "32"). */
+  recommendedLength?: string;
+  /** Id of the size chart the recommendation was calculated against. */
+  chartId: string;
+  /** Set when the chart had to be borrowed from another category or department. */
+  chartNote?: string;
   calculatedAt: string;
 }
 

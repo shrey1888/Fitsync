@@ -1,4 +1,4 @@
-import { Brand, ClothingCategory, Product, SizeChart } from '../types';
+import { Brand, ClothingCategory, GenderCategory, Product, SizeChart, SizeChartEntry } from '../types';
 
 export const BRANDS: Brand[] = [
   {
@@ -53,7 +53,7 @@ export const BRANDS: Brand[] = [
     sizingTendency: 'true_to_size',
     sizingNote: 'Numeric sizing based on true waist circumference and actual inseam length.',
     categories: ['bottoms', 'tops', 'outerwear'],
-    heroImage: 'https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=1200&q=80',
+    heroImage: 'https://images.unsplash.com/photo-1565084888279-aca607ecce0c?auto=format&fit=crop&w=1200&q=80',
     website: 'https://www.levi.com',
     founded: 1853,
   },
@@ -81,7 +81,7 @@ export const BRANDS: Brand[] = [
     sizingTendency: 'true_to_size',
     sizingNote: 'Standard sportswear ease. Classic tracksuits feature roomier hip and thigh grading.',
     categories: ['tops', 'bottoms', 'outerwear'],
-    heroImage: 'https://images.unsplash.com/photo-1518002171953-a080ee817e1f?auto=format&fit=crop&w=1200&q=80',
+    heroImage: 'https://images.unsplash.com/photo-1542272454315-4c01d7abdf4a?auto=format&fit=crop&w=1200&q=80',
     website: 'https://www.adidas.com',
     founded: 1949,
   },
@@ -313,7 +313,21 @@ export const PRODUCTS: Product[] = [
   },
 ];
 
-export const SIZE_CHARTS: SizeChart[] = [
+
+const LEVIS_MENS_LENGTHS = [
+  { label: '30', inseam: 76 },
+  { label: '32', inseam: 81 },
+  { label: '34', inseam: 86 },
+  { label: '36', inseam: 91 },
+];
+
+const LEVIS_WOMENS_LENGTHS = [
+  { label: '28', inseam: 71 },
+  { label: '30', inseam: 76 },
+  { label: '32', inseam: 81 },
+];
+
+const CORE_CHARTS: SizeChart[] = [
   // ZARA MENSWEAR TOPS (General Brand Standard Chart)
   {
     id: 'sc-zara-tops-menswear',
@@ -434,14 +448,15 @@ export const SIZE_CHARTS: SizeChart[] = [
     isVerified: true,
     sourceNote: "Verified Levi's Official Denim Waist & Hip Measurement Standard",
     entries: [
-      { size: '29', waistMin: 72, waistMax: 74, hipMin: 88, hipMax: 91, inseamMin: 76, inseamMax: 84 },
-      { size: '30', waistMin: 75, waistMax: 77, hipMin: 91, hipMax: 94, inseamMin: 76, inseamMax: 84 },
-      { size: '31', waistMin: 78, waistMax: 80, hipMin: 94, hipMax: 97, inseamMin: 76, inseamMax: 84 },
-      { size: '32', waistMin: 81, waistMax: 84, hipMin: 97, hipMax: 100, inseamMin: 76, inseamMax: 84 },
-      { size: '33', waistMin: 84, waistMax: 86, hipMin: 100, hipMax: 103, inseamMin: 76, inseamMax: 84 },
-      { size: '34', waistMin: 87, waistMax: 90, hipMin: 103, hipMax: 106, inseamMin: 76, inseamMax: 84 },
-      { size: '36', waistMin: 92, waistMax: 96, hipMin: 108, hipMax: 112, inseamMin: 76, inseamMax: 84 },
+      { size: '29', waistMin: 72, waistMax: 74, hipMin: 88, hipMax: 91 },
+      { size: '30', waistMin: 75, waistMax: 77, hipMin: 91, hipMax: 94 },
+      { size: '31', waistMin: 78, waistMax: 80, hipMin: 94, hipMax: 97 },
+      { size: '32', waistMin: 81, waistMax: 84, hipMin: 97, hipMax: 100 },
+      { size: '33', waistMin: 84, waistMax: 86, hipMin: 100, hipMax: 103 },
+      { size: '34', waistMin: 87, waistMax: 90, hipMin: 103, hipMax: 106 },
+      { size: '36', waistMin: 92, waistMax: 96, hipMin: 108, hipMax: 112 },
     ],
+    lengthOptions: LEVIS_MENS_LENGTHS,
   },
 
   // LEVI'S PRODUCT SPECIFIC: 511 Slim Fit Jeans
@@ -461,6 +476,7 @@ export const SIZE_CHARTS: SizeChart[] = [
       { size: '33', waistMin: 85, waistMax: 87, hipMin: 99, hipMax: 102, garmentWaist: 86.5 },
       { size: '34', waistMin: 88, waistMax: 91, hipMin: 102, hipMax: 105, garmentWaist: 89 },
     ],
+    lengthOptions: LEVIS_MENS_LENGTHS,
   },
 
   // NIKE MENSWEAR TOPS (Athletic Standard)
@@ -534,3 +550,243 @@ export const SIZE_CHARTS: SizeChart[] = [
   },
 ];
 
+
+// ---------------------------------------------------------------------------
+// Extended coverage: every brand now has its own menswear + womenswear charts for
+// the categories it sells, so the engine never has to borrow another brand's chart.
+// Values are body measurements in cm, approximated from each brand's public size
+// guide, and flagged isVerified: false so the UI can label them honestly.
+// Outerwear reuses a brand's tops chart (brands grade jackets on the same chest
+// measurements); see resolveChart in the sizing engine.
+// ---------------------------------------------------------------------------
+
+type Range = [number, number];
+
+function row(
+  size: string,
+  dims: { chest?: Range; waist?: Range; hip?: Range; shoulder?: Range }
+): SizeChartEntry {
+  const e: SizeChartEntry = { size };
+  if (dims.chest) [e.chestMin, e.chestMax] = dims.chest;
+  if (dims.waist) [e.waistMin, e.waistMax] = dims.waist;
+  if (dims.hip) [e.hipMin, e.hipMax] = dims.hip;
+  if (dims.shoulder) [e.shoulderMin, e.shoulderMax] = dims.shoulder;
+  return e;
+}
+
+function brandChart(
+  brandId: string,
+  category: ClothingCategory,
+  gender: GenderCategory,
+  sourceNote: string,
+  entries: SizeChartEntry[],
+  extra: Partial<SizeChart> = {}
+): SizeChart {
+  return {
+    id: `sc-${brandId}-${category}-${gender}`,
+    brandId,
+    category,
+    gender,
+    isProductSpecific: false,
+    isVerified: false,
+    sourceNote,
+    entries,
+    ...extra,
+  };
+}
+
+const EXTENDED_CHARTS: SizeChart[] = [
+  // ----- MENSWEAR TOPS (missing brands) -----
+  brandChart('levis', 'tops', 'menswear', "Levi's men's tops & jackets guide (approximated)", [
+    row('S', { chest: [88, 95], waist: [74, 81] }),
+    row('M', { chest: [96, 103], waist: [82, 89] }),
+    row('L', { chest: [104, 112], waist: [90, 97] }),
+    row('XL', { chest: [113, 121], waist: [98, 106] }),
+    row('XXL', { chest: [122, 130], waist: [107, 116] }),
+  ]),
+
+  // ----- MENSWEAR BOTTOMS -----
+  brandChart('zara', 'bottoms', 'menswear', "Zara men's trousers, EU sizing (approximated)", [
+    row('38', { waist: [75, 78], hip: [91, 94] }),
+    row('40', { waist: [79, 82], hip: [95, 98] }),
+    row('42', { waist: [83, 86], hip: [99, 102] }),
+    row('44', { waist: [87, 90], hip: [103, 106] }),
+    row('46', { waist: [91, 95], hip: [107, 111] }),
+    row('48', { waist: [96, 100], hip: [112, 116] }),
+  ]),
+  brandChart('hm', 'bottoms', 'menswear', "H&M men's trousers guide (approximated)", [
+    row('XS', { waist: [72, 76], hip: [88, 92] }),
+    row('S', { waist: [77, 82], hip: [93, 97] }),
+    row('M', { waist: [83, 88], hip: [98, 102] }),
+    row('L', { waist: [89, 96], hip: [103, 108] }),
+    row('XL', { waist: [97, 104], hip: [109, 114] }),
+  ]),
+  brandChart('uniqlo', 'bottoms', 'menswear', "Uniqlo men's bottoms guide (approximated)", [
+    row('XS', { waist: [68, 73], hip: [84, 89] }),
+    row('S', { waist: [74, 79], hip: [90, 95] }),
+    row('M', { waist: [80, 85], hip: [96, 100] }),
+    row('L', { waist: [86, 91], hip: [101, 105] }),
+    row('XL', { waist: [92, 100], hip: [106, 112] }),
+  ]),
+  brandChart('nike', 'bottoms', 'menswear', "Nike men's bottoms guide (approximated)", [
+    row('S', { waist: [74, 81], hip: [88, 95] }),
+    row('M', { waist: [82, 89], hip: [96, 103] }),
+    row('L', { waist: [90, 97], hip: [104, 111] }),
+    row('XL', { waist: [98, 108], hip: [112, 120] }),
+    row('XXL', { waist: [109, 120], hip: [121, 130] }),
+  ]),
+  brandChart('adidas', 'bottoms', 'menswear', "Adidas men's bottoms guide (approximated)", [
+    row('S', { waist: [75, 82], hip: [88, 95] }),
+    row('M', { waist: [83, 90], hip: [96, 103] }),
+    row('L', { waist: [91, 98], hip: [104, 111] }),
+    row('XL', { waist: [99, 108], hip: [112, 120] }),
+  ]),
+  brandChart('mango', 'bottoms', 'menswear', "Mango men's trousers, EU sizing (approximated)", [
+    row('38', { waist: [74, 77], hip: [90, 93] }),
+    row('40', { waist: [78, 81], hip: [94, 97] }),
+    row('42', { waist: [82, 85], hip: [98, 101] }),
+    row('44', { waist: [86, 89], hip: [102, 105] }),
+    row('46', { waist: [90, 94], hip: [106, 110] }),
+  ]),
+  brandChart('asos', 'bottoms', 'menswear', "ASOS Design men's trousers, waist sizing (approximated)", [
+    row('W28', { waist: [69, 73], hip: [84, 88] }),
+    row('W30', { waist: [74, 78], hip: [89, 93] }),
+    row('W32', { waist: [79, 83], hip: [94, 98] }),
+    row('W34', { waist: [84, 88], hip: [99, 103] }),
+    row('W36', { waist: [89, 93], hip: [104, 108] }),
+    row('W38', { waist: [94, 99], hip: [109, 114] }),
+  ]),
+
+  // ----- WOMENSWEAR TOPS -----
+  brandChart('zara', 'tops', 'womenswear', "Zara women's tops guide (approximated)", [
+    row('XS', { chest: [80, 83], waist: [61, 64] }),
+    row('S', { chest: [84, 87], waist: [65, 68] }),
+    row('M', { chest: [88, 92], waist: [69, 73] }),
+    row('L', { chest: [93, 98], waist: [74, 79] }),
+    row('XL', { chest: [99, 104], waist: [80, 85] }),
+  ]),
+  brandChart('hm', 'tops', 'womenswear', "H&M women's tops guide (approximated)", [
+    row('XS', { chest: [80, 84], waist: [63, 67] }),
+    row('S', { chest: [85, 89], waist: [68, 72] }),
+    row('M', { chest: [90, 95], waist: [73, 78] }),
+    row('L', { chest: [96, 101], waist: [79, 84] }),
+    row('XL', { chest: [102, 108], waist: [85, 91] }),
+  ]),
+  brandChart('uniqlo', 'tops', 'womenswear', "Uniqlo women's tops guide (approximated)", [
+    row('XS', { chest: [76, 80], waist: [58, 62] }),
+    row('S', { chest: [81, 84], waist: [63, 66] }),
+    row('M', { chest: [85, 88], waist: [67, 70] }),
+    row('L', { chest: [89, 94], waist: [71, 76] }),
+    row('XL', { chest: [95, 100], waist: [77, 82] }),
+  ]),
+  brandChart('levis', 'tops', 'womenswear', "Levi's women's tops guide (approximated)", [
+    row('XS', { chest: [80, 84], waist: [62, 66] }),
+    row('S', { chest: [85, 89], waist: [67, 71] }),
+    row('M', { chest: [90, 95], waist: [72, 77] }),
+    row('L', { chest: [96, 102], waist: [78, 84] }),
+    row('XL', { chest: [103, 110], waist: [85, 92] }),
+  ]),
+  brandChart('nike', 'tops', 'womenswear', "Nike women's tops guide (approximated)", [
+    row('XS', { chest: [76, 83], waist: [60, 67] }),
+    row('S', { chest: [84, 90], waist: [68, 74] }),
+    row('M', { chest: [91, 97], waist: [75, 81] }),
+    row('L', { chest: [98, 104], waist: [82, 88] }),
+    row('XL', { chest: [105, 114], waist: [89, 98] }),
+  ]),
+  brandChart('adidas', 'tops', 'womenswear', "Adidas women's tops guide (approximated)", [
+    row('XS', { chest: [78, 82], waist: [63, 66] }),
+    row('S', { chest: [83, 87], waist: [67, 71] }),
+    row('M', { chest: [88, 93], waist: [72, 77] }),
+    row('L', { chest: [94, 100], waist: [78, 84] }),
+    row('XL', { chest: [101, 107], waist: [85, 92] }),
+  ]),
+  brandChart('mango', 'tops', 'womenswear', "Mango women's tops guide (approximated)", [
+    row('XS', { chest: [80, 83], waist: [61, 64] }),
+    row('S', { chest: [84, 87], waist: [65, 68] }),
+    row('M', { chest: [88, 92], waist: [69, 73] }),
+    row('L', { chest: [93, 97], waist: [74, 78] }),
+    row('XL', { chest: [98, 103], waist: [79, 84] }),
+  ]),
+  brandChart('asos', 'tops', 'womenswear', "ASOS Design women's UK sizing (approximated)", [
+    row('UK 6', { chest: [76, 79], waist: [58, 61] }),
+    row('UK 8', { chest: [80, 83], waist: [62, 65] }),
+    row('UK 10', { chest: [84, 88], waist: [66, 70] }),
+    row('UK 12', { chest: [89, 93], waist: [71, 75] }),
+    row('UK 14', { chest: [94, 98], waist: [76, 80] }),
+    row('UK 16', { chest: [99, 104], waist: [81, 86] }),
+    row('UK 18', { chest: [105, 111], waist: [87, 93] }),
+  ]),
+
+  // ----- WOMENSWEAR BOTTOMS -----
+  brandChart('zara', 'bottoms', 'womenswear', "Zara women's trousers guide (approximated)", [
+    row('XS', { waist: [61, 64], hip: [88, 91] }),
+    row('S', { waist: [65, 68], hip: [92, 95] }),
+    row('M', { waist: [69, 73], hip: [96, 99] }),
+    row('L', { waist: [74, 79], hip: [100, 105] }),
+    row('XL', { waist: [80, 85], hip: [106, 111] }),
+  ]),
+  brandChart('hm', 'bottoms', 'womenswear', "H&M women's trousers guide (approximated)", [
+    row('XS', { waist: [63, 67], hip: [88, 92] }),
+    row('S', { waist: [68, 72], hip: [93, 97] }),
+    row('M', { waist: [73, 78], hip: [98, 103] }),
+    row('L', { waist: [79, 84], hip: [104, 109] }),
+    row('XL', { waist: [85, 91], hip: [110, 116] }),
+  ]),
+  brandChart('uniqlo', 'bottoms', 'womenswear', "Uniqlo women's bottoms guide (approximated)", [
+    row('XS', { waist: [58, 62], hip: [84, 88] }),
+    row('S', { waist: [63, 66], hip: [89, 91] }),
+    row('M', { waist: [67, 70], hip: [92, 94] }),
+    row('L', { waist: [71, 76], hip: [95, 99] }),
+    row('XL', { waist: [77, 82], hip: [100, 104] }),
+  ]),
+  brandChart(
+    'levis',
+    'bottoms',
+    'womenswear',
+    "Levi's women's denim waist sizing (approximated)",
+    [
+      row('24', { waist: [61, 63], hip: [86, 88] }),
+      row('25', { waist: [63.5, 66], hip: [88.5, 91] }),
+      row('26', { waist: [66.5, 68.5], hip: [91.5, 93.5] }),
+      row('27', { waist: [69, 71], hip: [94, 96] }),
+      row('28', { waist: [71.5, 73.5], hip: [96.5, 98.5] }),
+      row('29', { waist: [74, 76], hip: [99, 101] }),
+      row('30', { waist: [76.5, 78.5], hip: [101.5, 103.5] }),
+      row('31', { waist: [79, 81], hip: [104, 106] }),
+      row('32', { waist: [81.5, 84], hip: [106.5, 109] }),
+    ],
+    { lengthOptions: LEVIS_WOMENS_LENGTHS }
+  ),
+  brandChart('nike', 'bottoms', 'womenswear', "Nike women's bottoms guide (approximated)", [
+    row('XS', { waist: [60, 67], hip: [84, 91] }),
+    row('S', { waist: [68, 74], hip: [92, 98] }),
+    row('M', { waist: [75, 81], hip: [99, 105] }),
+    row('L', { waist: [82, 88], hip: [106, 112] }),
+    row('XL', { waist: [89, 98], hip: [113, 120] }),
+  ]),
+  brandChart('adidas', 'bottoms', 'womenswear', "Adidas women's bottoms guide (approximated)", [
+    row('XS', { waist: [63, 66], hip: [88, 91] }),
+    row('S', { waist: [67, 71], hip: [92, 96] }),
+    row('M', { waist: [72, 77], hip: [97, 102] }),
+    row('L', { waist: [78, 84], hip: [103, 108] }),
+    row('XL', { waist: [85, 92], hip: [109, 115] }),
+  ]),
+  brandChart('mango', 'bottoms', 'womenswear', "Mango women's trousers guide (approximated)", [
+    row('XS', { waist: [61, 64], hip: [87, 90] }),
+    row('S', { waist: [65, 68], hip: [91, 94] }),
+    row('M', { waist: [69, 73], hip: [95, 98] }),
+    row('L', { waist: [74, 78], hip: [99, 103] }),
+    row('XL', { waist: [79, 84], hip: [104, 108] }),
+  ]),
+  brandChart('asos', 'bottoms', 'womenswear', "ASOS Design women's UK sizing (approximated)", [
+    row('UK 6', { waist: [58, 61], hip: [84, 87] }),
+    row('UK 8', { waist: [62, 65], hip: [88, 91] }),
+    row('UK 10', { waist: [66, 70], hip: [92, 96] }),
+    row('UK 12', { waist: [71, 75], hip: [97, 101] }),
+    row('UK 14', { waist: [76, 80], hip: [102, 106] }),
+    row('UK 16', { waist: [81, 86], hip: [107, 112] }),
+    row('UK 18', { waist: [87, 93], hip: [113, 119] }),
+  ]),
+];
+
+export const SIZE_CHARTS: SizeChart[] = [...CORE_CHARTS, ...EXTENDED_CHARTS];

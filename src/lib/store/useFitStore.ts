@@ -1,7 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { BodyMeasurements, SavedRecommendation } from '../types';
+import { useSyncExternalStore } from 'react';
+import {
+  BodyMeasurements,
+  FitPreference,
+  GenderCategory,
+  MeasurementUnit,
+  SavedRecommendation,
+} from '../types';
 import { isSupabaseConfigured, supabase } from '../supabase/client';
 
 export const SAMPLE_PROFILES: { label: string; description: string; measurements: BodyMeasurements }[] = [
@@ -71,6 +77,8 @@ export const SAMPLE_PROFILES: { label: string; description: string; measurements
   },
 ];
 
+export const DEFAULT_MEASUREMENTS: BodyMeasurements = SAMPLE_PROFILES[0].measurements;
+
 const STORAGE_KEYS = {
   MEASUREMENTS: 'fitsync_measurements_v1',
   SAVED_BRANDS: 'fitsync_saved_brands_v1',
@@ -78,117 +86,196 @@ const STORAGE_KEYS = {
   HISTORY: 'fitsync_history_v1',
 };
 
-export function useFitSync() {
-  const [measurements, setMeasurementsState] = useState<BodyMeasurements | null>(null);
-  const [savedBrands, setSavedBrandsState] = useState<string[]>(['zara', 'uniqlo', 'levis']);
-  const [recentBrands, setRecentBrandsState] = useState<string[]>(['zara', 'hm', 'nike']);
-  const [history, setHistoryState] = useState<SavedRecommendation[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
+const hoursAgo = (h: number) => new Date(Date.now() - h * 3600000).toISOString();
 
-  // Initialize from LocalStorage and/or Supabase
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      try {
-        const storedMeas = localStorage.getItem(STORAGE_KEYS.MEASUREMENTS);
-        if (storedMeas) {
-          setMeasurementsState(JSON.parse(storedMeas));
-        } else {
-          // Pre-populate with the prompt's reference profile so the user gets an instant wow factor!
-          const defaultProfile = SAMPLE_PROFILES[0].measurements;
-          setMeasurementsState(defaultProfile);
-          localStorage.setItem(STORAGE_KEYS.MEASUREMENTS, JSON.stringify(defaultProfile));
-        }
+// Demo history shown until the user saves their first recommendation.
+const sampleHistory = (): SavedRecommendation[] => [
+  {
+    id: 'rec-1',
+    brandId: 'zara',
+    brandName: 'Zara',
+    category: 'tops',
+    recommendedSize: 'M',
+    confidenceLevel: 'High',
+    confidenceScore: 96,
+    createdAt: hoursAgo(2),
+  },
+  {
+    id: 'rec-2',
+    brandId: 'hm',
+    brandName: 'H&M',
+    category: 'tops',
+    recommendedSize: 'L',
+    confidenceLevel: 'High',
+    confidenceScore: 92,
+    createdAt: hoursAgo(6),
+  },
+  {
+    id: 'rec-3',
+    brandId: 'uniqlo',
+    brandName: 'Uniqlo',
+    category: 'tops',
+    recommendedSize: 'M',
+    confidenceLevel: 'High',
+    confidenceScore: 95,
+    createdAt: hoursAgo(24),
+  },
+  {
+    id: 'rec-4',
+    brandId: 'levis',
+    brandName: "Levi's",
+    category: 'bottoms',
+    recommendedSize: '32',
+    confidenceLevel: 'High',
+    confidenceScore: 98,
+    createdAt: hoursAgo(48),
+  },
+];
 
-        const storedSaved = localStorage.getItem(STORAGE_KEYS.SAVED_BRANDS);
-        if (storedSaved) {
-          setSavedBrandsState(JSON.parse(storedSaved));
-        }
+interface FitState {
+  measurements: BodyMeasurements | null;
+  savedBrands: string[];
+  recentBrands: string[];
+  history: SavedRecommendation[];
+  isLoaded: boolean;
+}
 
-        const storedRecent = localStorage.getItem(STORAGE_KEYS.RECENT_BRANDS);
-        if (storedRecent) {
-          setRecentBrandsState(JSON.parse(storedRecent));
-        }
+// Snapshot used on the server and during hydration. Kept as a single constant so
+// useSyncExternalStore always receives the same reference.
+const SERVER_STATE: FitState = {
+  measurements: null,
+  savedBrands: ['zara', 'uniqlo', 'levis'],
+  recentBrands: ['zara', 'hm', 'nike'],
+  history: [],
+  isLoaded: false,
+};
 
-        const storedHist = localStorage.getItem(STORAGE_KEYS.HISTORY);
-        if (storedHist) {
-          setHistoryState(JSON.parse(storedHist));
-        } else {
-          // Initial sample history
-          const initialHist: SavedRecommendation[] = [
-            {
-              id: 'rec-1',
-              brandId: 'zara',
-              brandName: 'Zara',
-              category: 'tops',
-              recommendedSize: 'M',
-              confidenceLevel: 'High',
-              confidenceScore: 96,
-              createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-            },
-            {
-              id: 'rec-2',
-              brandId: 'hm',
-              brandName: 'H&M',
-              category: 'tops',
-              recommendedSize: 'L',
-              confidenceLevel: 'High',
-              confidenceScore: 92,
-              createdAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-            },
-            {
-              id: 'rec-3',
-              brandId: 'uniqlo',
-              brandName: 'Uniqlo',
-              category: 'tops',
-              recommendedSize: 'M',
-              confidenceLevel: 'High',
-              confidenceScore: 95,
-              createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-            },
-            {
-              id: 'rec-4',
-              brandId: 'levis',
-              brandName: "Levi's",
-              category: 'bottoms',
-              recommendedSize: '32',
-              confidenceLevel: 'High',
-              confidenceScore: 98,
-              createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
-            },
-          ];
-          setHistoryState(initialHist);
-          localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(initialHist));
-        }
-      } catch {
-        // Fallback
-        setMeasurementsState(SAMPLE_PROFILES[0].measurements);
-      } finally {
-        setIsLoaded(true);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+const GENDERS: GenderCategory[] = ['menswear', 'womenswear', 'unisex'];
+const FITS: FitPreference[] = ['slim', 'regular', 'relaxed', 'oversized'];
+const UNITS: MeasurementUnit[] = ['cm', 'inch'];
 
-  const saveMeasurements = async (newMeasurements: BodyMeasurements) => {
-    const updated = {
-      ...newMeasurements,
-      lastUpdated: new Date().toISOString(),
-    };
-    setMeasurementsState(updated);
+const isPositive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+
+/**
+ * Repairs a stored profile. Older builds could persist 0 (an emptied number field)
+ * or NaN; those values would silently skew every recommendation, so they fall back
+ * to the reference profile instead.
+ */
+function sanitizeMeasurements(raw: unknown): BodyMeasurements | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const m = raw as Partial<BodyMeasurements>;
+  const d = DEFAULT_MEASUREMENTS;
+  return {
+    height: isPositive(m.height) ? m.height : d.height,
+    weight: isPositive(m.weight) ? m.weight : undefined,
+    chest: isPositive(m.chest) ? m.chest : d.chest,
+    waist: isPositive(m.waist) ? m.waist : d.waist,
+    shoulder: isPositive(m.shoulder) ? m.shoulder : d.shoulder,
+    hip: isPositive(m.hip) ? m.hip : d.hip,
+    inseam: isPositive(m.inseam) ? m.inseam : d.inseam,
+    gender: m.gender && GENDERS.includes(m.gender) ? m.gender : d.gender,
+    fitPreference: m.fitPreference && FITS.includes(m.fitPreference) ? m.fitPreference : d.fitPreference,
+    unit: m.unit && UNITS.includes(m.unit) ? m.unit : d.unit,
+    lastUpdated: typeof m.lastUpdated === 'string' ? m.lastUpdated : undefined,
+  };
+}
+
+function readJSON<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJSON(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.warn('Storage write failed:', e);
+  }
+}
+
+function loadFromStorage(): FitState {
+  const savedBrands = readJSON<string[]>(STORAGE_KEYS.SAVED_BRANDS);
+  const recentBrands = readJSON<string[]>(STORAGE_KEYS.RECENT_BRANDS);
+  const history = readJSON<SavedRecommendation[]>(STORAGE_KEYS.HISTORY);
+
+  return {
+    // First-time visitors get the reference profile so every screen has something to show.
+    measurements: sanitizeMeasurements(readJSON(STORAGE_KEYS.MEASUREMENTS)) ?? DEFAULT_MEASUREMENTS,
+    savedBrands: Array.isArray(savedBrands) ? savedBrands : SERVER_STATE.savedBrands,
+    recentBrands: Array.isArray(recentBrands) ? recentBrands : SERVER_STATE.recentBrands,
+    history: Array.isArray(history) ? history : sampleHistory(),
+    isLoaded: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Module-level store: every component reads the same state, so saving a brand
+// on one card or editing the profile updates the navbar, dashboard, etc. at once.
+// ---------------------------------------------------------------------------
+let state: FitState = SERVER_STATE;
+let initialized = false;
+const listeners = new Set<() => void>();
+
+function emit() {
+  listeners.forEach((l) => l());
+}
+
+function ensureInitialized() {
+  if (initialized || typeof window === 'undefined') return;
+  initialized = true;
+  state = loadFromStorage();
+  // Keep multiple open tabs in sync.
+  window.addEventListener('storage', (e) => {
+    if (e.key && (Object.values(STORAGE_KEYS) as string[]).includes(e.key)) {
+      state = loadFromStorage();
+      emit();
+    }
+  });
+}
+
+function subscribe(listener: () => void) {
+  ensureInitialized();
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function getSnapshot() {
+  ensureInitialized();
+  return state;
+}
+
+function getServerSnapshot() {
+  return SERVER_STATE;
+}
+
+function setState(patch: Partial<FitState>) {
+  state = { ...state, ...patch };
+  emit();
+}
+
+async function saveMeasurements(newMeasurements: BodyMeasurements) {
+  const updated: BodyMeasurements = {
+    ...newMeasurements,
+    lastUpdated: new Date().toISOString(),
+  };
+  setState({ measurements: updated });
+  writeJSON(STORAGE_KEYS.MEASUREMENTS, updated);
+
+  // If Supabase is connected and user is logged in
+  if (isSupabaseConfigured && supabase) {
     try {
-      localStorage.setItem(STORAGE_KEYS.MEASUREMENTS, JSON.stringify(updated));
-
-      // If Supabase is connected and user is logged in
-      if (isSupabaseConfigured && supabase) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session?.user) {
-          await supabase.from('body_measurements').upsert({
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { error } = await supabase.from('body_measurements').upsert(
+          {
             user_id: session.user.id,
             height: updated.height,
             weight: updated.weight,
@@ -200,70 +287,61 @@ export function useFitSync() {
             gender: updated.gender,
             fit_preference: updated.fitPreference,
             unit: updated.unit,
-          });
-        }
+          },
+          // body_measurements has a unique(user_id) constraint; without this the
+          // upsert tries to insert a second row and fails.
+          { onConflict: 'user_id' }
+        );
+        if (error) console.warn('Supabase sync error:', error.message);
       }
     } catch (e) {
-      console.warn('Storage sync error:', e);
+      console.warn('Supabase sync error:', e);
     }
-  };
+  }
+}
 
-  const toggleSaveBrand = (brandId: string) => {
-    setSavedBrandsState((prev) => {
-      const next = prev.includes(brandId)
-        ? prev.filter((id) => id !== brandId)
-        : [...prev, brandId];
-      try {
-        localStorage.setItem(STORAGE_KEYS.SAVED_BRANDS, JSON.stringify(next));
-      } catch (e) {
-        console.warn(e);
-      }
-      return next;
-    });
-  };
+function toggleSaveBrand(brandId: string) {
+  const prev = state.savedBrands;
+  const next = prev.includes(brandId) ? prev.filter((id) => id !== brandId) : [...prev, brandId];
+  setState({ savedBrands: next });
+  writeJSON(STORAGE_KEYS.SAVED_BRANDS, next);
+}
 
-  const recordBrandVisit = (brandId: string) => {
-    setRecentBrandsState((prev) => {
-      const filtered = prev.filter((id) => id !== brandId);
-      const next = [brandId, ...filtered].slice(0, 6);
-      try {
-        localStorage.setItem(STORAGE_KEYS.RECENT_BRANDS, JSON.stringify(next));
-      } catch (e) {
-        console.warn(e);
-      }
-      return next;
-    });
-  };
+function recordBrandVisit(brandId: string) {
+  const next = [brandId, ...state.recentBrands.filter((id) => id !== brandId)].slice(0, 6);
+  setState({ recentBrands: next });
+  writeJSON(STORAGE_KEYS.RECENT_BRANDS, next);
+}
 
-  const addRecommendationHistory = (rec: Omit<SavedRecommendation, 'id' | 'createdAt'>) => {
-    const item: SavedRecommendation = {
-      ...rec,
-      id: 'rec-' + Date.now(),
-      createdAt: new Date().toISOString(),
-    };
-
-    setHistoryState((prev) => {
-      const next = [item, ...prev.filter((p) => !(p.brandId === item.brandId && p.category === item.category))].slice(0, 15);
-      try {
-        localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(next));
-      } catch (e) {
-        console.warn(e);
-      }
-      return next;
-    });
+function addRecommendationHistory(rec: Omit<SavedRecommendation, 'id' | 'createdAt'>) {
+  const item: SavedRecommendation = {
+    ...rec,
+    id: 'rec-' + Date.now(),
+    createdAt: new Date().toISOString(),
   };
+  const next = [
+    item,
+    ...state.history.filter(
+      (p) => !(p.brandId === item.brandId && p.category === item.category && p.productId === item.productId)
+    ),
+  ].slice(0, 15);
+  setState({ history: next });
+  writeJSON(STORAGE_KEYS.HISTORY, next);
+}
+
+export function useFitSync() {
+  const s = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   return {
-    measurements,
-    isLoaded,
-    hasMeasurements: Boolean(measurements && measurements.chest && measurements.waist),
+    measurements: s.measurements,
+    isLoaded: s.isLoaded,
+    hasMeasurements: Boolean(s.measurements && s.measurements.chest && s.measurements.waist),
     saveMeasurements,
-    savedBrands,
+    savedBrands: s.savedBrands,
     toggleSaveBrand,
-    recentBrands,
+    recentBrands: s.recentBrands,
     recordBrandVisit,
-    history,
+    history: s.history,
     addRecommendationHistory,
   };
 }
-

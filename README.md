@@ -69,6 +69,11 @@ FITSYNC is a modern fashion-tech platform built to eliminate vanity sizing discr
 - **Saved Brands & Recommendation History.**
 - **Supabase Cloud Sync Inspector:** Copyable SQL schema and configuration instructions.
 
+### 6. Size Translator (`/translate`)
+- For shoppers without a tape measure: "H&M S fits me, what do I wear elsewhere?"
+- Pick department, category (tops / bottoms), a reference brand, the size that fits, and whether it feels tight, right or loose.
+- [`src/lib/sizing/translator.ts`](src/lib/sizing/translator.ts) reads that size's ranges off the reference brand's chart to estimate the body, then runs the normal sizing engine against every other brand, flagging "between sizes" cases.
+
 ---
 
 ## Sizing Recommendation Algorithm

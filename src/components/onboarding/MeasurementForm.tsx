@@ -2,82 +2,230 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useFitSync, SAMPLE_PROFILES } from '@/lib/store/useFitStore';
+import { useFitSync, SAMPLE_PROFILES, DEFAULT_MEASUREMENTS } from '@/lib/store/useFitStore';
 import { BodyMeasurements, FitPreference, GenderCategory, MeasurementUnit } from '@/lib/types';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Check,
-  ChevronRight,
-  ChevronLeft,
-  Sparkles,
-  Info,
-  Ruler,
-  HelpCircle,
-  ArrowRight,
-  RotateCcw,
-} from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Check, ChevronRight, ChevronLeft, Sparkles, Ruler, ArrowRight, RotateCcw } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import NumericField from '@/components/ui/NumericField';
 
 interface FormProps {
   onSavedRedirect?: string;
 }
 
-export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormProps) {
-  const router = useRouter();
-  const { measurements, saveMeasurements } = useFitSync();
+type Step = 1 | 2 | 3;
+type FieldKey = 'height' | 'weight' | 'chest' | 'waist' | 'shoulder' | 'hip' | 'inseam';
+type FieldValues = Record<FieldKey, number | undefined>;
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [unit, setUnit] = useState<MeasurementUnit>(measurements?.unit || 'cm');
+// Accepted ranges are stored in metric (cm, kg) and converted for display.
+const FIELD_RULES: Record<FieldKey, { label: string; min: number; max: number; required: boolean; kind: 'length' | 'mass' }> = {
+  height: { label: 'Height', min: 120, max: 230, required: true, kind: 'length' },
+  weight: { label: 'Weight', min: 30, max: 250, required: false, kind: 'mass' },
+  chest: { label: 'Chest', min: 60, max: 160, required: true, kind: 'length' },
+  waist: { label: 'Waist', min: 50, max: 150, required: true, kind: 'length' },
+  shoulder: { label: 'Shoulder width', min: 30, max: 65, required: true, kind: 'length' },
+  hip: { label: 'Hip', min: 60, max: 160, required: true, kind: 'length' },
+  inseam: { label: 'Inseam', min: 55, max: 105, required: true, kind: 'length' },
+};
+
+const STEP_FIELDS: Record<1 | 2, FieldKey[]> = {
+  1: ['height', 'weight'],
+  2: ['chest', 'waist', 'shoulder', 'hip', 'inseam'],
+};
+
+const BODY_FIELDS: { key: Exclude<FieldKey, 'height' | 'weight'>; label: string }[] = [
+  { key: 'chest', label: 'Chest / Bust Circumference' },
+  { key: 'waist', label: 'Waist Circumference' },
+  { key: 'shoulder', label: 'Shoulder Width (Biacromial)' },
+  { key: 'hip', label: 'Hip & Seat Circumference' },
+  { key: 'inseam', label: 'Inner Leg Inseam' },
+];
+
+// Conversions. Metric values keep one decimal so a round trip through inches/lbs
+// doesn't drift by whole units.
+const round1 = (v: number) => Math.round(v * 10) / 10;
+const cmToInch = (v: number) => round1(v / 2.54);
+const inchToCm = (v: number) => round1(v * 2.54);
+const kgToLbs = (v: number) => round1(v * 2.20462);
+const lbsToKg = (v: number) => round1(v / 2.20462);
+
+const toDisplay = (key: FieldKey, metric: number | undefined, unit: MeasurementUnit) => {
+  if (metric === undefined || unit === 'cm') return metric;
+  return FIELD_RULES[key].kind === 'mass' ? kgToLbs(metric) : cmToInch(metric);
+};
+
+const fromDisplay = (key: FieldKey, shown: number | undefined, unit: MeasurementUnit) => {
+  if (shown === undefined || unit === 'cm') return shown;
+  return FIELD_RULES[key].kind === 'mass' ? lbsToKg(shown) : inchToCm(shown);
+};
+
+const unitLabelFor = (key: FieldKey, unit: MeasurementUnit) =>
+  FIELD_RULES[key].kind === 'mass' ? (unit === 'cm' ? 'kg' : 'lbs') : unit === 'cm' ? 'cm' : 'in';
+
+function validateField(key: FieldKey, metric: number | undefined, unit: MeasurementUnit): string | undefined {
+  const rule = FIELD_RULES[key];
+  if (metric === undefined) return rule.required ? `${rule.label} is required.` : undefined;
+  if (metric < rule.min || metric > rule.max) {
+    const lo = Math.round(toDisplay(key, rule.min, unit) ?? rule.min);
+    const hi = Math.round(toDisplay(key, rule.max, unit) ?? rule.max);
+    return `${rule.label} must be between ${lo} and ${hi} ${unitLabelFor(key, unit)}.`;
+  }
+  return undefined;
+}
+
+const valuesFrom = (m: BodyMeasurements): FieldValues => ({
+  height: m.height,
+  weight: m.weight,
+  chest: m.chest,
+  waist: m.waist,
+  shoulder: m.shoulder,
+  hip: m.hip,
+  inseam: m.inseam,
+});
+
+const GUIDES: Record<
+  string,
+  { title: string; instruction: string; tip: string; svgCoord: string }
+> = {
+  height: {
+    title: 'Total Body Stature',
+    instruction: 'Stand barefoot with heels flat against a wall. Measure vertically to the crown of your head.',
+    tip: 'Do not measure with thick shoes or hair accessories.',
+    svgCoord: 'Y-axis full vertical crown-to-ground',
+  },
+  chest: {
+    title: 'Chest / Bust Circumference',
+    instruction:
+      'Wrap the tape measure around the fullest part of your chest, keeping it level under your armpits and across your shoulder blades.',
+    tip: 'Breathe out naturally. Do not expand or puff out your chest.',
+    svgCoord: 'Axillary level horizontal tape line',
+  },
+  waist: {
+    title: 'Natural Waistline',
+    instruction:
+      'Measure around your natural waistline, typically located midway between your lowest rib and the top of your hip bone (near the navel).',
+    tip: 'Keep the tape snug but comfortable — one finger should comfortably slip behind the tape.',
+    svgCoord: 'Mid-torso iliac contour line',
+  },
+  shoulder: {
+    title: 'Shoulder Biacromial Width',
+    instruction:
+      'Measure horizontally across the back from the prominent bony tip of one shoulder (acromion) to the other.',
+    tip: 'Keep arms relaxed at your sides. Having a partner assist yields highest accuracy.',
+    svgCoord: 'Transverse posterior shoulder seam',
+  },
+  hip: {
+    title: 'Seat & Hip Maximum Circumference',
+    instruction:
+      'Stand with feet together and measure around the fullest, widest point of your hips and buttocks.',
+    tip: 'Ensure the tape remains parallel to the floor all the way around.',
+    svgCoord: 'Trochanteric horizontal contour',
+  },
+  inseam: {
+    title: 'Inner Leg Inseam',
+    instruction:
+      'Measure from the lowest point of your groin / inner crotch seam straight down the inside of your leg to your ankle bone.',
+    tip: 'Alternatively, measure a pair of well-fitting pants laid flat along the inside leg seam.',
+    svgCoord: 'Medial femoral crotch-to-hem seam',
+  },
+};
+
+/**
+ * Waits for the stored profile to load before mounting the form, so the inputs
+ * start from the user's saved numbers instead of hard-coded defaults.
+ */
+export default function MeasurementForm(props: FormProps) {
+  const { measurements, isLoaded } = useFitSync();
+
+  if (!isLoaded) {
+    return (
+      <div className="bg-[#FAF9F6] border border-[#E8E6DF] max-w-4xl mx-auto py-24 text-center">
+        <div className="w-8 h-8 border-2 border-[#121212] border-t-transparent rounded-full animate-spin mx-auto" />
+        <span className="block mt-4 font-mono text-xs uppercase tracking-widest text-[#6E6D68]">
+          Loading your profile...
+        </span>
+      </div>
+    );
+  }
+
+  return <MeasurementFormInner {...props} initial={measurements ?? DEFAULT_MEASUREMENTS} />;
+}
+
+function MeasurementFormInner({
+  onSavedRedirect = '/finder',
+  initial,
+}: FormProps & { initial: BodyMeasurements }) {
+  const router = useRouter();
+  const { saveMeasurements } = useFitSync();
+
+  const [step, setStep] = useState<Step>(1);
+  const [unit, setUnit] = useState<MeasurementUnit>(initial.unit || 'cm');
   const [activeGuide, setActiveGuide] = useState<string>('chest');
 
-  // Form states (internal storage in metric cm/kg)
-  const [gender, setGender] = useState<GenderCategory>(measurements?.gender || 'menswear');
-  const [height, setHeight] = useState<number>(measurements?.height || 175);
-  const [weight, setWeight] = useState<number | undefined>(measurements?.weight || 72);
-  const [chest, setChest] = useState<number>(measurements?.chest || 96);
-  const [waist, setWaist] = useState<number>(measurements?.waist || 82);
-  const [shoulder, setShoulder] = useState<number>(measurements?.shoulder || 44);
-  const [hip, setHip] = useState<number>(measurements?.hip || 98);
-  const [inseam, setInseam] = useState<number>(measurements?.inseam || 80);
-  const [fitPreference, setFitPreference] = useState<FitPreference>(
-    measurements?.fitPreference || 'regular'
-  );
-
+  // Form values are kept in metric (cm / kg); undefined = field left empty.
+  const [gender, setGender] = useState<GenderCategory>(initial.gender || 'menswear');
+  const [values, setValues] = useState<FieldValues>(() => valuesFrom(initial));
+  const [fitPreference, setFitPreference] = useState<FitPreference>(initial.fitPreference || 'regular');
+  const [touched, setTouched] = useState<Partial<Record<FieldKey, boolean>>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Helper conversions
-  const cmToInch = (val: number) => Math.round((val / 2.54) * 10) / 10;
-  const inchToCm = (val: number) => Math.round(val * 2.54 * 10) / 10;
-  const kgToLbs = (val?: number) => (val ? Math.round(val * 2.20462) : '');
-  const lbsToKg = (val?: number) => (val ? Math.round(val / 2.20462) : undefined);
+  const errorFor = (key: FieldKey) => validateField(key, values[key], unit);
+  const visibleError = (key: FieldKey) => (touched[key] ? errorFor(key) : undefined);
 
-  const handleUnitToggle = (newUnit: MeasurementUnit) => {
-    setUnit(newUnit);
+  const setField = (key: FieldKey, shown: number | undefined) =>
+    setValues((prev) => ({ ...prev, [key]: fromDisplay(key, shown, unit) }));
+
+  const markTouched = (keys: FieldKey[]) =>
+    setTouched((prev) => ({ ...prev, ...Object.fromEntries(keys.map((k) => [k, true])) }));
+
+  const firstInvalidStep = (upTo: Step): 1 | 2 | null => {
+    for (const s of [1, 2] as const) {
+      if (s >= upTo) break;
+      if (STEP_FIELDS[s].some((k) => errorFor(k))) return s;
+    }
+    return null;
   };
 
-  const handleLoadSample = (profile: typeof SAMPLE_PROFILES[0]) => {
+  // Moving forward requires the earlier steps to be valid; going back is always allowed.
+  const goToStep = (target: Step) => {
+    if (target <= step) {
+      setStep(target);
+      return;
+    }
+    const blocked = firstInvalidStep(target);
+    if (blocked) {
+      markTouched(STEP_FIELDS[blocked]);
+      setStep(blocked);
+      return;
+    }
+    setStep(target);
+  };
+
+  const handleLoadSample = (profile: (typeof SAMPLE_PROFILES)[0]) => {
     setGender(profile.measurements.gender);
-    setHeight(profile.measurements.height);
-    setWeight(profile.measurements.weight);
-    setChest(profile.measurements.chest);
-    setWaist(profile.measurements.waist);
-    setShoulder(profile.measurements.shoulder);
-    setHip(profile.measurements.hip);
-    setInseam(profile.measurements.inseam);
+    setValues(valuesFrom(profile.measurements));
     setFitPreference(profile.measurements.fitPreference);
+    setTouched({});
   };
 
   const handleSave = async () => {
+    const blocked = firstInvalidStep(3);
+    if (blocked) {
+      markTouched([...STEP_FIELDS[1], ...STEP_FIELDS[2]]);
+      setStep(blocked);
+      return;
+    }
+
     setIsSubmitting(true);
     const newProfile: BodyMeasurements = {
       gender,
-      height,
-      weight,
-      chest,
-      waist,
-      shoulder,
-      hip,
-      inseam,
+      height: values.height!,
+      weight: values.weight,
+      chest: values.chest!,
+      waist: values.waist!,
+      shoulder: values.shoulder!,
+      hip: values.hip!,
+      inseam: values.inseam!,
       fitPreference,
       unit,
     };
@@ -101,51 +249,15 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
     }, 600);
   };
 
-  const guides: Record<
-    string,
-    { title: string; instruction: string; tip: string; svgCoord: string }
-  > = {
-    height: {
-      title: 'Total Body Stature',
-      instruction: 'Stand barefoot with heels flat against a wall. Measure vertically to the crown of your head.',
-      tip: 'Do not measure with thick shoes or hair accessories.',
-      svgCoord: 'Y-axis full vertical crown-to-ground',
-    },
-    chest: {
-      title: 'Chest / Bust Circumference',
-      instruction:
-        'Wrap the tape measure around the fullest part of your chest, keeping it level under your armpits and across your shoulder blades.',
-      tip: 'Breathe out naturally. Do not expand or puff out your chest.',
-      svgCoord: 'Axillary level horizontal tape line',
-    },
-    waist: {
-      title: 'Natural Waistline',
-      instruction:
-        'Measure around your natural waistline, typically located midway between your lowest rib and the top of your hip bone (near the navel).',
-      tip: 'Keep the tape snug but comfortable — one finger should comfortably slip behind the tape.',
-      svgCoord: 'Mid-torso iliac contour line',
-    },
-    shoulder: {
-      title: 'Shoulder Biacromial Width',
-      instruction:
-        'Measure horizontally across the back from the prominent bony tip of one shoulder (acromion) to the other.',
-      tip: 'Keep arms relaxed at your sides. Having a partner assist yields highest accuracy.',
-      svgCoord: 'Transverse posterior shoulder seam',
-    },
-    hip: {
-      title: 'Seat & Hip Maximum Circumference',
-      instruction:
-        'Stand with feet together and measure around the fullest, widest point of your hips and buttocks.',
-      tip: 'Ensure the tape remains parallel to the floor all the way around.',
-      svgCoord: 'Trochanteric horizontal contour',
-    },
-    inseam: {
-      title: 'Inner Leg Inseam',
-      instruction:
-        'Measure from the lowest point of your groin / inner crotch seam straight down the inside of your leg to your ankle bone.',
-      tip: 'Alternatively, measure a pair of well-fitting pants laid flat along the inside leg seam.',
-      svgCoord: 'Medial femoral crotch-to-hem seam',
-    },
+  const shown = (key: FieldKey) => toDisplay(key, values[key], unit);
+  // Range in display units, used for arrow-key stepping and clamping.
+  const bounds = (key: FieldKey) => ({
+    min: Math.round(toDisplay(key, FIELD_RULES[key].min, unit)!),
+    max: Math.round(toDisplay(key, FIELD_RULES[key].max, unit)!),
+  });
+  const readout = (key: FieldKey) => {
+    const v = shown(key);
+    return v === undefined ? '—' : `${v} ${unitLabelFor(key, unit)}`;
   };
 
   return (
@@ -166,27 +278,27 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
           </p>
         </div>
 
-        {/* Unit toggle & Archetype loader */}
+        {/* Unit toggle */}
         <div className="flex items-center space-x-2 self-start sm:self-center">
-          <div className="inline-flex border border-[#E8E6DF] p-0.5 bg-[#FAF9F6]">
-            <button
-              type="button"
-              onClick={() => handleUnitToggle('cm')}
-              className={`px-3 py-1 text-xs uppercase tracking-wider font-mono transition-all ${
-                unit === 'cm' ? 'bg-[#121212] text-white shadow-xs' : 'text-[#6E6D68] hover:text-[#121212]'
-              }`}
-            >
-              Metric (CM)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleUnitToggle('inch')}
-              className={`px-3 py-1 text-xs uppercase tracking-wider font-mono transition-all ${
-                unit === 'inch' ? 'bg-[#121212] text-white shadow-xs' : 'text-[#6E6D68] hover:text-[#121212]'
-              }`}
-            >
-              Imperial (IN)
-            </button>
+          <div className="inline-flex border border-[#E8E6DF] p-0.5 bg-[#FAF9F6]" role="group" aria-label="Measurement units">
+            {(
+              [
+                { id: 'cm', label: 'Metric (CM)' },
+                { id: 'inch', label: 'Imperial (IN)' },
+              ] as const
+            ).map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => setUnit(u.id)}
+                aria-pressed={unit === u.id}
+                className={`px-3 py-1 text-xs uppercase tracking-wider font-mono transition-all ${
+                  unit === u.id ? 'bg-[#121212] text-white shadow-xs' : 'text-[#6E6D68] hover:text-[#121212]'
+                }`}
+              >
+                {u.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -196,9 +308,7 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
         <div className="flex items-center space-x-2 text-[#6E6D68]">
           <Sparkles className="w-3.5 h-3.5 text-[#9F8253]" />
           <span className="font-medium text-[#121212]">Quick Test Archetypes:</span>
-          <span className="hidden md:inline text-[#6E6D68]">
-            Instant load verified test measurements
-          </span>
+          <span className="hidden md:inline text-[#6E6D68]">Instant load verified test measurements</span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {SAMPLE_PROFILES.map((prof, idx) => (
@@ -209,7 +319,7 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
               title={prof.description}
               className="text-[11px] px-2.5 py-1 bg-white border border-[#D8D6CF] hover:border-[#121212] hover:bg-[#121212] hover:text-white transition-all text-[#121212]"
             >
-              {prof.label.split(' ')[0]} {prof.label.split(' ')[1] || ''}
+              {prof.label.split(' ').slice(0, 2).join(' ')}
             </button>
           ))}
         </div>
@@ -217,61 +327,40 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
 
       {/* Step Indicators */}
       <div className="grid grid-cols-3 border-b border-[#E8E6DF] bg-white text-center text-xs">
-        <button
-          type="button"
-          onClick={() => setStep(1)}
-          className={`py-3.5 border-b-2 transition-all flex items-center justify-center space-x-2 ${
-            step === 1 ? 'border-[#121212] text-[#121212] font-semibold' : 'border-transparent text-[#6E6D68]'
-          }`}
-        >
-          <span className="w-5 h-5 rounded-full border border-current flex items-center justify-center text-[10px] font-mono">
-            1
-          </span>
-          <span className="hidden sm:inline uppercase tracking-[0.14em]">Basic Info</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setStep(2)}
-          className={`py-3.5 border-b-2 transition-all flex items-center justify-center space-x-2 ${
-            step === 2 ? 'border-[#121212] text-[#121212] font-semibold' : 'border-transparent text-[#6E6D68]'
-          }`}
-        >
-          <span className="w-5 h-5 rounded-full border border-current flex items-center justify-center text-[10px] font-mono">
-            2
-          </span>
-          <span className="hidden sm:inline uppercase tracking-[0.14em]">Measurements</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setStep(3)}
-          className={`py-3.5 border-b-2 transition-all flex items-center justify-center space-x-2 ${
-            step === 3 ? 'border-[#121212] text-[#121212] font-semibold' : 'border-transparent text-[#6E6D68]'
-          }`}
-        >
-          <span className="w-5 h-5 rounded-full border border-current flex items-center justify-center text-[10px] font-mono">
-            3
-          </span>
-          <span className="hidden sm:inline uppercase tracking-[0.14em]">Fit Preference</span>
-        </button>
+        {(
+          [
+            { id: 1, label: 'Basic Info' },
+            { id: 2, label: 'Measurements' },
+            { id: 3, label: 'Fit Preference' },
+          ] as const
+        ).map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => goToStep(s.id)}
+            aria-current={step === s.id ? 'step' : undefined}
+            className={`py-3.5 border-b-2 transition-all flex items-center justify-center space-x-2 ${
+              step === s.id ? 'border-[#121212] text-[#121212] font-semibold' : 'border-transparent text-[#6E6D68]'
+            }`}
+          >
+            <span className="w-5 h-5 rounded-full border border-current flex items-center justify-center text-[10px] font-mono">
+              {s.id}
+            </span>
+            <span className="hidden sm:inline uppercase tracking-[0.14em]">{s.label}</span>
+          </button>
+        ))}
       </div>
 
       {/* Step Content */}
       <div className="p-6 sm:p-10">
         {/* STEP 1: BASIC INFORMATION */}
         {step === 1 && (
-          <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 10 }}
-            className="space-y-8"
-          >
+          <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
             {/* Gender / Sizing category */}
             <div>
-              <label className="block text-xs uppercase tracking-[0.18em] text-[#121212] font-medium mb-3">
+              <span className="block text-xs uppercase tracking-[0.18em] text-[#121212] font-medium mb-3">
                 Sizing Department
-              </label>
+              </span>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {(
                   [
@@ -284,6 +373,7 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
                     key={g.id}
                     type="button"
                     onClick={() => setGender(g.id)}
+                    aria-pressed={gender === g.id}
                     className={`p-4 text-left border transition-all ${
                       gender === g.id
                         ? 'border-[#121212] bg-[#121212] text-[#FAF9F6]'
@@ -294,11 +384,7 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
                       <span className="font-medium text-sm">{g.label}</span>
                       {gender === g.id && <Check className="w-4 h-4 text-[#FAF9F6]" />}
                     </div>
-                    <p
-                      className={`text-xs mt-1 leading-relaxed ${
-                        gender === g.id ? 'text-[#FAF9F6]/70' : 'text-[#6E6D68]'
-                      }`}
-                    >
+                    <p className={`text-xs mt-1 leading-relaxed ${gender === g.id ? 'text-[#FAF9F6]/70' : 'text-[#6E6D68]'}`}>
                       {g.note}
                     </p>
                   </button>
@@ -308,65 +394,54 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
 
             {/* Height & Weight Inputs */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
-              {/* Height */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs uppercase tracking-[0.18em] text-[#121212] font-medium flex items-center gap-1.5">
+                  <label
+                    htmlFor="field-height"
+                    className="text-xs uppercase tracking-[0.18em] text-[#121212] font-medium flex items-center gap-1.5"
+                  >
                     Height
                     <span className="text-rose-600">*</span>
                   </label>
-                  <span className="text-[11px] font-mono text-[#6E6D68]">
-                    {unit === 'cm' ? `${height} cm` : `${cmToInch(height)} in`}
-                  </span>
+                  <span className="text-[11px] font-mono text-[#6E6D68]">{readout('height')}</span>
                 </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={unit === 'cm' ? height : cmToInch(height)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setHeight(unit === 'cm' ? val : inchToCm(val));
-                    }}
-                    onFocus={() => setActiveGuide('height')}
-                    min={unit === 'cm' ? 120 : 48}
-                    max={unit === 'cm' ? 230 : 90}
-                    className="w-full bg-white border border-[#D8D6CF] focus:border-[#121212] px-4 py-3 text-sm font-mono outline-hidden transition-colors"
-                  />
-                  <span className="absolute right-3 top-3 text-xs uppercase text-[#6E6D68] font-mono pointer-events-none">
-                    {unit}
-                  </span>
-                </div>
+                <NumericField
+                  id="field-height"
+                  value={shown('height')}
+                  {...bounds('height')}
+                  onChange={(v) => setField('height', v)}
+                  onBlur={() => markTouched(['height'])}
+                  unitLabel={unitLabelFor('height', unit)}
+                  step={unit === 'cm' ? 1 : 0.5}
+                  placeholder={unit === 'cm' ? 'e.g. 175' : 'e.g. 69'}
+                  error={visibleError('height')}
+                />
                 <p className="text-[11px] text-[#6E6D68] mt-1.5">
                   Essential for sleeve length, jacket drop, and vertical grading.
                 </p>
               </div>
 
-              {/* Weight (Optional) */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs uppercase tracking-[0.18em] text-[#121212] font-medium flex items-center gap-1.5">
+                  <label
+                    htmlFor="field-weight"
+                    className="text-xs uppercase tracking-[0.18em] text-[#121212] font-medium flex items-center gap-1.5"
+                  >
                     Weight
                     <span className="text-[10px] text-[#9B9A93] lowercase tracking-normal">(optional)</span>
                   </label>
-                  <span className="text-[11px] font-mono text-[#6E6D68]">
-                    {unit === 'cm' ? `${weight || '-'} kg` : `${kgToLbs(weight) || '-'} lbs`}
-                  </span>
+                  <span className="text-[11px] font-mono text-[#6E6D68]">{readout('weight')}</span>
                 </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={unit === 'cm' ? weight || '' : kgToLbs(weight)}
-                    onChange={(e) => {
-                      const val = e.target.value ? Number(e.target.value) : undefined;
-                      setWeight(unit === 'cm' ? val : lbsToKg(val));
-                    }}
-                    placeholder={unit === 'cm' ? 'e.g. 72' : 'e.g. 160'}
-                    className="w-full bg-white border border-[#D8D6CF] focus:border-[#121212] px-4 py-3 text-sm font-mono outline-hidden transition-colors"
-                  />
-                  <span className="absolute right-3 top-3 text-xs uppercase text-[#6E6D68] font-mono pointer-events-none">
-                    {unit === 'cm' ? 'kg' : 'lbs'}
-                  </span>
-                </div>
+                <NumericField
+                  id="field-weight"
+                  value={shown('weight')}
+                  {...bounds('weight')}
+                  onChange={(v) => setField('weight', v)}
+                  onBlur={() => markTouched(['weight'])}
+                  unitLabel={unitLabelFor('weight', unit)}
+                  placeholder={unit === 'cm' ? 'e.g. 72' : 'e.g. 160'}
+                  error={visibleError('weight')}
+                />
                 <p className="text-[11px] text-[#6E6D68] mt-1.5">
                   Helps fine-tune body mass distribution calculations.
                 </p>
@@ -380,185 +455,41 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
           <motion.div
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 10 }}
             className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
           >
             {/* Input fields column */}
             <div className="lg:col-span-7 space-y-5">
-              {/* Chest */}
-              <div
-                className={`p-3.5 border transition-all ${
-                  activeGuide === 'chest' ? 'border-[#121212] bg-[#FAF9F6]' : 'border-[#E8E6DF] bg-white'
-                }`}
-                onClick={() => setActiveGuide('chest')}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs uppercase tracking-[0.18em] font-medium text-[#121212]">
-                    Chest / Bust Circumference <span className="text-rose-600">*</span>
-                  </label>
-                  <span className="font-mono text-xs text-[#121212] font-semibold">
-                    {unit === 'cm' ? `${chest} cm` : `${cmToInch(chest)} in`}
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={unit === 'cm' ? chest : cmToInch(chest)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setChest(unit === 'cm' ? val : inchToCm(val));
-                    }}
-                    onFocus={() => setActiveGuide('chest')}
-                    min={60}
-                    max={160}
+              {BODY_FIELDS.map((f) => (
+                <div
+                  key={f.key}
+                  className={`p-3.5 border transition-all ${
+                    activeGuide === f.key ? 'border-[#121212] bg-[#FAF9F6]' : 'border-[#E8E6DF] bg-white'
+                  }`}
+                  onClick={() => setActiveGuide(f.key)}
+                >
+                  <div className="flex items-center justify-between mb-1.5 gap-3">
+                    <label
+                      htmlFor={`field-${f.key}`}
+                      className="text-xs uppercase tracking-[0.18em] font-medium text-[#121212]"
+                    >
+                      {f.label} <span className="text-rose-600">*</span>
+                    </label>
+                    <span className="font-mono text-xs text-[#121212] font-semibold shrink-0">{readout(f.key)}</span>
+                  </div>
+                  <NumericField
+                    id={`field-${f.key}`}
+                    size="sm"
+                    value={shown(f.key)}
+                    {...bounds(f.key)}
+                    onChange={(v) => setField(f.key, v)}
+                    onFocus={() => setActiveGuide(f.key)}
+                    onBlur={() => markTouched([f.key])}
+                    unitLabel={unitLabelFor(f.key, unit)}
                     step={0.5}
-                    className="w-full bg-white border border-[#D8D6CF] focus:border-[#121212] px-3.5 py-2.5 text-sm font-mono outline-hidden"
+                    error={visibleError(f.key)}
                   />
-                  <span className="absolute right-3 top-2.5 text-xs font-mono text-[#6E6D68]">
-                    {unit}
-                  </span>
                 </div>
-              </div>
-
-              {/* Waist */}
-              <div
-                className={`p-3.5 border transition-all ${
-                  activeGuide === 'waist' ? 'border-[#121212] bg-[#FAF9F6]' : 'border-[#E8E6DF] bg-white'
-                }`}
-                onClick={() => setActiveGuide('waist')}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs uppercase tracking-[0.18em] font-medium text-[#121212]">
-                    Waist Circumference <span className="text-rose-600">*</span>
-                  </label>
-                  <span className="font-mono text-xs text-[#121212] font-semibold">
-                    {unit === 'cm' ? `${waist} cm` : `${cmToInch(waist)} in`}
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={unit === 'cm' ? waist : cmToInch(waist)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setWaist(unit === 'cm' ? val : inchToCm(val));
-                    }}
-                    onFocus={() => setActiveGuide('waist')}
-                    min={50}
-                    max={150}
-                    step={0.5}
-                    className="w-full bg-white border border-[#D8D6CF] focus:border-[#121212] px-3.5 py-2.5 text-sm font-mono outline-hidden"
-                  />
-                  <span className="absolute right-3 top-2.5 text-xs font-mono text-[#6E6D68]">
-                    {unit}
-                  </span>
-                </div>
-              </div>
-
-              {/* Shoulder Width */}
-              <div
-                className={`p-3.5 border transition-all ${
-                  activeGuide === 'shoulder' ? 'border-[#121212] bg-[#FAF9F6]' : 'border-[#E8E6DF] bg-white'
-                }`}
-                onClick={() => setActiveGuide('shoulder')}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs uppercase tracking-[0.18em] font-medium text-[#121212]">
-                    Shoulder Width (Biacromial)
-                  </label>
-                  <span className="font-mono text-xs text-[#121212] font-semibold">
-                    {unit === 'cm' ? `${shoulder} cm` : `${cmToInch(shoulder)} in`}
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={unit === 'cm' ? shoulder : cmToInch(shoulder)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setShoulder(unit === 'cm' ? val : inchToCm(val));
-                    }}
-                    onFocus={() => setActiveGuide('shoulder')}
-                    min={30}
-                    max={65}
-                    step={0.5}
-                    className="w-full bg-white border border-[#D8D6CF] focus:border-[#121212] px-3.5 py-2.5 text-sm font-mono outline-hidden"
-                  />
-                  <span className="absolute right-3 top-2.5 text-xs font-mono text-[#6E6D68]">
-                    {unit}
-                  </span>
-                </div>
-              </div>
-
-              {/* Hip */}
-              <div
-                className={`p-3.5 border transition-all ${
-                  activeGuide === 'hip' ? 'border-[#121212] bg-[#FAF9F6]' : 'border-[#E8E6DF] bg-white'
-                }`}
-                onClick={() => setActiveGuide('hip')}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs uppercase tracking-[0.18em] font-medium text-[#121212]">
-                    Hip & Seat Circumference
-                  </label>
-                  <span className="font-mono text-xs text-[#121212] font-semibold">
-                    {unit === 'cm' ? `${hip} cm` : `${cmToInch(hip)} in`}
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={unit === 'cm' ? hip : cmToInch(hip)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setHip(unit === 'cm' ? val : inchToCm(val));
-                    }}
-                    onFocus={() => setActiveGuide('hip')}
-                    min={60}
-                    max={160}
-                    step={0.5}
-                    className="w-full bg-white border border-[#D8D6CF] focus:border-[#121212] px-3.5 py-2.5 text-sm font-mono outline-hidden"
-                  />
-                  <span className="absolute right-3 top-2.5 text-xs font-mono text-[#6E6D68]">
-                    {unit}
-                  </span>
-                </div>
-              </div>
-
-              {/* Inseam */}
-              <div
-                className={`p-3.5 border transition-all ${
-                  activeGuide === 'inseam' ? 'border-[#121212] bg-[#FAF9F6]' : 'border-[#E8E6DF] bg-white'
-                }`}
-                onClick={() => setActiveGuide('inseam')}
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs uppercase tracking-[0.18em] font-medium text-[#121212]">
-                    Inner Leg Inseam
-                  </label>
-                  <span className="font-mono text-xs text-[#121212] font-semibold">
-                    {unit === 'cm' ? `${inseam} cm` : `${cmToInch(inseam)} in`}
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    value={unit === 'cm' ? inseam : cmToInch(inseam)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setInseam(unit === 'cm' ? val : inchToCm(val));
-                    }}
-                    onFocus={() => setActiveGuide('inseam')}
-                    min={60}
-                    max={100}
-                    step={0.5}
-                    className="w-full bg-white border border-[#D8D6CF] focus:border-[#121212] px-3.5 py-2.5 text-sm font-mono outline-hidden"
-                  />
-                  <span className="absolute right-3 top-2.5 text-xs font-mono text-[#6E6D68]">
-                    {unit}
-                  </span>
-                </div>
-              </div>
+              ))}
             </div>
 
             {/* Interactive Visual Illustration / Instructions Column */}
@@ -691,16 +622,16 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
               {/* Dynamic instruction text */}
               <div className="mt-4 space-y-2">
                 <h4 className="font-serif text-base font-semibold text-[#121212]">
-                  {guides[activeGuide]?.title || 'Measurement Protocol'}
+                  {GUIDES[activeGuide]?.title || 'Measurement Protocol'}
                 </h4>
                 <p className="text-xs text-[#6E6D68] leading-relaxed">
-                  {guides[activeGuide]?.instruction}
+                  {GUIDES[activeGuide]?.instruction}
                 </p>
                 <div className="bg-[#FAF9F6] border-l-2 border-[#9F8253] p-2.5 mt-3">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-[#121212] block">
                     Tailor Tip
                   </span>
-                  <p className="text-[11px] text-[#6E6D68] mt-0.5">{guides[activeGuide]?.tip}</p>
+                  <p className="text-[11px] text-[#6E6D68] mt-0.5">{GUIDES[activeGuide]?.tip}</p>
                 </div>
               </div>
             </div>
@@ -709,12 +640,7 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
 
         {/* STEP 3: FIT PREFERENCE */}
         {step === 3 && (
-          <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 10 }}
-            className="space-y-6"
-          >
+          <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
             <div>
               <label className="block text-xs uppercase tracking-[0.18em] text-[#121212] font-medium mb-1">
                 Preferred Garment Silhouette
@@ -796,11 +722,12 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
                   Calibrated Measurement Summary
                 </span>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-[#121212] font-medium mt-1">
-                  <span>Height: {height}cm</span>
-                  <span>Chest: {chest}cm</span>
-                  <span>Waist: {waist}cm</span>
-                  <span>Shoulder: {shoulder}cm</span>
-                  <span>Hip: {hip}cm</span>
+                  <span>Height: {readout('height')}</span>
+                  <span>Chest: {readout('chest')}</span>
+                  <span>Waist: {readout('waist')}</span>
+                  <span>Shoulder: {readout('shoulder')}</span>
+                  <span>Hip: {readout('hip')}</span>
+                  <span>Inseam: {readout('inseam')}</span>
                   <span>Fit: {fitPreference.toUpperCase()}</span>
                 </div>
               </div>
@@ -821,7 +748,7 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
         {step > 1 ? (
           <button
             type="button"
-            onClick={() => setStep((s) => (s - 1) as 1 | 2 | 3)}
+            onClick={() => setStep((s) => (s - 1) as Step)}
             className="inline-flex items-center text-xs uppercase tracking-[0.16em] text-[#6E6D68] hover:text-[#121212] px-4 py-2 border border-[#E8E6DF] transition-colors"
           >
             <ChevronLeft className="w-4 h-4 mr-1" />
@@ -842,7 +769,7 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
           {step < 3 ? (
             <button
               type="button"
-              onClick={() => setStep((s) => (s + 1) as 1 | 2 | 3)}
+              onClick={() => goToStep((step + 1) as Step)}
               className="inline-flex items-center px-6 py-2.5 text-xs uppercase tracking-[0.16em] bg-[#121212] text-white hover:bg-[#2B2B2B] transition-all group"
             >
               <span>Continue</span>
@@ -864,4 +791,3 @@ export default function MeasurementForm({ onSavedRedirect = '/finder' }: FormPro
     </div>
   );
 }
-

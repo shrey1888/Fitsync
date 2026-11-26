@@ -6,25 +6,16 @@ import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import { BRANDS } from '@/lib/data/brands';
 import { recommendSize } from '@/lib/sizing/engine';
-import { useFitSync } from '@/lib/store/useFitStore';
 import {
   ArrowRight,
-  Sparkles,
   ShieldCheck,
   Ruler,
   ChevronDown,
-  Layers,
   Check,
-  Sliders,
-  Maximize2,
-  RefreshCw,
-  ShoppingBag,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function LandingPage() {
-  const { measurements } = useFitSync();
-
   // Interactive Hero Preview State (defaults to prompt's archetype: 175cm, 96cm chest, 82cm waist)
   const [heroChest, setHeroChest] = useState(96);
   const [heroWaist, setHeroWaist] = useState(82);
@@ -172,6 +163,17 @@ export default function LandingPage() {
                   </Link>
                 </div>
 
+                <Link
+                  href="/translate"
+                  className="inline-flex items-center text-xs text-[#6E6D68] hover:text-[#121212] transition-colors"
+                >
+                  <span>
+                    No tape measure? Tell us a size you wear (like <span className="font-semibold">H&amp;M S</span>) and
+                    we&apos;ll translate it to every brand
+                  </span>
+                  <ArrowRight className="w-3.5 h-3.5 ml-1.5 shrink-0" />
+                </Link>
+
                 {/* Sub-credibility ticker */}
                 <div className="pt-8 border-t border-[#E8E6DF] flex flex-wrap items-center gap-6 text-[11px] font-mono text-[#6E6D68]">
                   <div className="flex items-center space-x-2">
@@ -245,10 +247,10 @@ export default function LandingPage() {
                         ZARA
                       </span>
                       <span className="font-serif text-3xl font-black text-[#121212] block my-0.5">
-                        {previewZara.recommendedSize}
+                        {previewZara?.recommendedSize ?? '—'}
                       </span>
                       <span className="text-[9px] font-mono text-[#9F8253] block">
-                        {previewZara.fitAssessment}
+                        {previewZara?.fitAssessment}
                       </span>
                     </div>
 
@@ -258,10 +260,10 @@ export default function LandingPage() {
                         H&M
                       </span>
                       <span className="font-serif text-3xl font-black text-[#121212] block my-0.5">
-                        {previewHM.recommendedSize}
+                        {previewHM?.recommendedSize ?? '—'}
                       </span>
                       <span className="text-[9px] font-mono text-[#9F8253] block">
-                        {previewHM.fitAssessment}
+                        {previewHM?.fitAssessment}
                       </span>
                     </div>
 
@@ -271,10 +273,10 @@ export default function LandingPage() {
                         UNIQLO
                       </span>
                       <span className="font-serif text-3xl font-black text-[#121212] block my-0.5">
-                        {previewUniqlo.recommendedSize}
+                        {previewUniqlo?.recommendedSize ?? '—'}
                       </span>
                       <span className="text-[9px] font-mono text-[#9F8253] block">
-                        {previewUniqlo.fitAssessment}
+                        {previewUniqlo?.fitAssessment}
                       </span>
                     </div>
 
@@ -284,7 +286,7 @@ export default function LandingPage() {
                         LEVI’S
                       </span>
                       <span className="font-serif text-3xl font-black text-[#121212] block my-0.5">
-                        {previewLevis.recommendedSize}
+                        {previewLevis?.recommendedSize ?? '—'}
                       </span>
                       <span className="text-[9px] font-mono text-[#9F8253] block">
                         Numeric Waist

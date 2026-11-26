@@ -3,47 +3,65 @@
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { BRANDS, PRODUCTS } from '@/lib/data/brands';
-import { ClothingCategory } from '@/lib/types';
-import { recommendSize } from '@/lib/sizing/engine';
-import { useFitSync } from '@/lib/store/useFitStore';
+import { BRANDS, PRODUCTS, SIZE_CHARTS } from '@/lib/data/brands';
+import { Brand, ClothingCategory } from '@/lib/types';
+import { recommendSize, chartGenderFor, possessive } from '@/lib/sizing/engine';
+import { useFitSync, DEFAULT_MEASUREMENTS } from '@/lib/store/useFitStore';
 import {
   Check,
   ShieldCheck,
-  Ruler,
-  AlertCircle,
   ArrowRight,
-  Sparkles,
   Bookmark,
-  Share2,
   Copy,
   Sliders,
-  ChevronDown,
   Info,
   CheckCircle2,
+  Repeat,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
+const FINDER_CATEGORIES: { id: ClothingCategory; label: string }[] = [
+  { id: 'tops', label: 'Tops & Shirts' },
+  { id: 'bottoms', label: 'Pants, Denim & Trousers' },
+  { id: 'outerwear', label: 'Coats & Jackets' },
+];
+
+/**
+ * Category to open the finder on: `wanted` when the brand sells it, otherwise the
+ * brand's primary category (e.g. denim for Levi's).
+ */
+function pickCategory(brand: Brand, wanted: string | null | undefined): ClothingCategory {
+  const finderIds = FINDER_CATEGORIES.map((c) => c.id);
+  const supported = brand.categories.filter((c) => finderIds.includes(c));
+  if (wanted && supported.includes(wanted as ClothingCategory)) return wanted as ClothingCategory;
+  return supported[0] ?? 'tops';
+}
+
+/**
+ * Reads ?brand=&category= and remounts the finder whenever they change, so
+ * following a link to another brand while already on /finder (e.g. from the
+ * footer) actually switches the selection.
+ */
 export default function SizeFinder() {
   const searchParams = useSearchParams();
   const urlBrand = searchParams.get('brand');
-  const urlCategory = searchParams.get('category') as ClothingCategory | null;
+  const brand = BRANDS.find((b) => b.id === urlBrand) ?? BRANDS[0];
+  const category = pickCategory(brand, searchParams.get('category'));
 
-  const {
-    measurements,
-    isLoaded,
-    hasMeasurements,
-    addRecommendationHistory,
-    recordBrandVisit,
-  } = useFitSync();
+  return <SizeFinderInner key={`${brand.id}-${category}`} initialBrandId={brand.id} initialCategory={category} />;
+}
 
-  // Selections
-  const initialBrandId =
-    urlBrand && BRANDS.some((b) => b.id === urlBrand) ? urlBrand : 'zara';
+function SizeFinderInner({
+  initialBrandId,
+  initialCategory,
+}: {
+  initialBrandId: string;
+  initialCategory: ClothingCategory;
+}) {
+  const { measurements, isLoaded, addRecommendationHistory, recordBrandVisit } = useFitSync();
+
   const [selectedBrandId, setSelectedBrandId] = useState<string>(initialBrandId);
-  const [selectedCategory, setSelectedCategory] = useState<ClothingCategory>(
-    urlCategory || 'tops'
-  );
+  const [selectedCategory, setSelectedCategory] = useState<ClothingCategory>(initialCategory);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [hasSavedToHistory, setHasSavedToHistory] = useState(false);
@@ -53,9 +71,7 @@ export default function SizeFinder() {
   const handleSelectBrand = (brandId: string) => {
     setSelectedBrandId(brandId);
     const nextBrand = BRANDS.find((b) => b.id === brandId) || BRANDS[0];
-    if (!nextBrand.categories.includes(selectedCategory)) {
-      setSelectedCategory(nextBrand.categories[0] || 'tops');
-    }
+    setSelectedCategory(pickCategory(nextBrand, selectedCategory));
     setSelectedProductId('');
     setHasSavedToHistory(false);
     recordBrandVisit(brandId);
@@ -72,19 +88,8 @@ export default function SizeFinder() {
     (p) => p.brandId === selectedBrandId && p.category === selectedCategory
   );
 
-  // Run Sizing Algorithm
-  const currentMeasurements = measurements || {
-    height: 175,
-    weight: 72,
-    chest: 96,
-    waist: 82,
-    shoulder: 44,
-    hip: 98,
-    inseam: 80,
-    gender: 'menswear',
-    fitPreference: 'regular',
-    unit: 'cm',
-  };
+  const currentMeasurements = measurements ?? DEFAULT_MEASUREMENTS;
+  const userDept = chartGenderFor(currentMeasurements.gender);
 
   const result = recommendSize({
     brandId: selectedBrandId,
@@ -92,16 +97,32 @@ export default function SizeFinder() {
     productId: selectedProductId || undefined,
     measurements: currentMeasurements,
   });
+  const activeChart = result ? SIZE_CHARTS.find((c) => c.id === result.chartId) : undefined;
+  const sizeLabel = result
+    ? result.recommendedLength
+      ? `${result.recommendedSize} × L${result.recommendedLength}`
+      : result.recommendedSize
+    : '';
+
+  if (!isLoaded) {
+    return (
+      <div className="max-w-5xl mx-auto py-20 text-center space-y-4">
+        <div className="w-8 h-8 border-2 border-[#121212] border-t-transparent rounded-full animate-spin mx-auto" />
+        <span className="font-mono text-xs uppercase tracking-widest text-[#6E6D68]">Loading your profile...</span>
+      </div>
+    );
+  }
 
   // Handle Save recommendation to history
   const handleSaveRecommendation = () => {
+    if (!result) return;
     addRecommendationHistory({
       brandId: currentBrand.id,
       brandName: currentBrand.name,
       productId: selectedProductId || undefined,
       productName: availableProducts.find((p) => p.id === selectedProductId)?.name,
       category: selectedCategory,
-      recommendedSize: result.recommendedSize,
+      recommendedSize: sizeLabel,
       confidenceLevel: result.confidenceLevel,
       confidenceScore: result.confidenceScore,
     });
@@ -109,11 +130,17 @@ export default function SizeFinder() {
     setTimeout(() => setHasSavedToHistory(false), 3000);
   };
 
-  const handleCopySummary = () => {
-    const text = `FITSYNC Recommendation:\nBrand: ${currentBrand.name}\nSize: ${result.recommendedSize}\nFit: ${result.fitAssessment}\nConfidence: ${result.confidenceLevel} (${result.confidenceScore}%)\nMeasurements: Chest ${currentMeasurements.chest}cm, Waist ${currentMeasurements.waist}cm.`;
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopySummary = async () => {
+    if (!result) return;
+    const text = `FITSYNC Recommendation:\nBrand: ${currentBrand.name}\nSize: ${sizeLabel}\nFit: ${result.fitAssessment}\nConfidence: ${result.confidenceLevel} (${result.confidenceScore}%)\nMeasurements: Chest ${currentMeasurements.chest}cm, Waist ${currentMeasurements.waist}cm.`;
+    try {
+      // navigator.clipboard is undefined on plain-http origins other than localhost.
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt('Copy your recommendation:', text);
+    }
   };
 
   return (
@@ -196,17 +223,15 @@ export default function SizeFinder() {
             2. Clothing Category
           </label>
           <div className="flex flex-wrap gap-2.5">
-            {[
-              { id: 'tops', label: 'Tops & Shirts', desc: 'Focuses on chest, shoulders & torso' },
-              { id: 'bottoms', label: 'Pants, Denim & Trousers', desc: 'Focuses on waist, hip & inseam' },
-              { id: 'outerwear', label: 'Coats & Jackets', desc: 'Focuses on chest with layering ease' },
-            ].map((cat) => {
-              const isSupported = currentBrand.categories.includes(cat.id as ClothingCategory);
+            {FINDER_CATEGORIES.map((cat) => {
+              const isSupported = currentBrand.categories.includes(cat.id);
               return (
                 <button
                   key={cat.id}
+                  type="button"
                   disabled={!isSupported}
-                  onClick={() => handleSelectCategory(cat.id as ClothingCategory)}
+                  title={isSupported ? undefined : `${currentBrand.name} doesn't sell this category`}
+                  onClick={() => handleSelectCategory(cat.id)}
                   className={`px-4 py-2.5 text-xs uppercase tracking-wider border transition-all text-left ${
                     selectedCategory === cat.id
                       ? 'border-[#121212] bg-[#121212] text-white'
@@ -260,10 +285,15 @@ export default function SizeFinder() {
                 >
                   <div className="flex items-center justify-between">
                     <span className="block text-[#121212] font-medium">{p.name}</span>
-                    <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 bg-[#F0EFEB]">
+                    <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 bg-[#F0EFEB] shrink-0">
                       {p.fitCut}
                     </span>
                   </div>
+                  {p.gender !== 'unisex' && p.gender !== userDept && (
+                    <span className="text-[9px] uppercase font-mono text-[#9F8253] block mt-0.5">
+                      {p.gender} cut
+                    </span>
+                  )}
                   <span className="text-[10px] text-[#6E6D68] mt-0.5 block">{p.fabric}</span>
                 </button>
               ))}
@@ -273,6 +303,16 @@ export default function SizeFinder() {
       </div>
 
       {/* CORE RESULT DISPLAY */}
+      {!result ? (
+        <div className="bg-white border-2 border-[#121212] p-10 text-center space-y-3">
+          <Info className="w-5 h-5 mx-auto text-[#9F8253]" />
+          <h3 className="font-serif text-2xl text-[#121212]">No size chart on file</h3>
+          <p className="text-xs text-[#6E6D68] max-w-md mx-auto">
+            We don&apos;t have a {currentBrand.name} chart for this category yet, so we won&apos;t guess a size
+            from another brand&apos;s grading.
+          </p>
+        </div>
+      ) : (
       <motion.div
         key={`${selectedBrandId}-${selectedCategory}-${selectedProductId}`}
         initial={{ opacity: 0, y: 15 }}
@@ -310,6 +350,11 @@ export default function SizeFinder() {
               <div className="flex items-baseline space-x-4">
                 <span className="font-serif text-7xl sm:text-8xl font-black text-[#121212] tracking-tighter leading-none">
                   {result.recommendedSize}
+                  {result.recommendedLength && (
+                    <span className="text-3xl sm:text-4xl font-bold text-[#6E6D68] tracking-normal ml-2">
+                      × L{result.recommendedLength}
+                    </span>
+                  )}
                 </span>
                 <div className="flex flex-col">
                   <span className="text-xs uppercase font-mono tracking-wider text-[#9F8253] font-semibold">
@@ -325,6 +370,12 @@ export default function SizeFinder() {
             <p className="text-sm text-[#4A4944] leading-relaxed pt-2">
               {result.summaryReason}
             </p>
+            {result.recommendedLength && (
+              <p className="text-xs font-mono text-[#6E6D68]">
+                W{result.recommendedSize} = waist size · L{result.recommendedLength} = leg length for your{' '}
+                {currentMeasurements.inseam}cm inseam
+              </p>
+            )}
           </div>
 
           {/* Alternative Size Box & Confidence Breakdown */}
@@ -368,13 +419,21 @@ export default function SizeFinder() {
                 Measurement Comparison vs. Brand Sizing Range
               </h4>
               <p className="text-xs text-[#6E6D68] mt-0.5">
-                Transparent comparison of your body tape measurements against {currentBrand.name}’s
-                pattern bounds.
+                Transparent comparison of your body tape measurements against{' '}
+                {possessive(currentBrand.name)} pattern bounds.
               </p>
             </div>
-            <span className="text-[10px] font-mono uppercase tracking-wider text-[#9F8253] self-start sm:self-center">
-              All values in CM
-            </span>
+            <div className="flex flex-col items-start sm:items-end gap-1 self-start sm:self-center">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[#9F8253]">All values in CM</span>
+              {activeChart && !activeChart.isVerified && (
+                <span
+                  title={activeChart.sourceNote}
+                  className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 border border-amber-200 bg-amber-50 text-amber-900"
+                >
+                  Approximate chart
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -447,6 +506,13 @@ export default function SizeFinder() {
             </table>
           </div>
 
+          {result.chartNote && (
+            <div className="bg-[#FAF9F6] border border-[#E8E6DF] p-4 text-xs text-[#4A4944] flex items-start space-x-3">
+              <Info className="w-4 h-4 shrink-0 mt-0.5 text-[#9F8253]" />
+              <p>{result.chartNote}</p>
+            </div>
+          )}
+
           {/* Missing measurements advisory if any */}
           {result.missingMeasurementsNotice && (
             <div className="bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 flex items-start space-x-3">
@@ -504,16 +570,26 @@ export default function SizeFinder() {
               </button>
             </div>
 
-            <Link
-              href="/dashboard"
-              className="text-xs uppercase tracking-wider text-[#6E6D68] hover:text-[#121212] inline-flex items-center"
-            >
-              <span>View All Brands Matrix</span>
-              <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
-            </Link>
+            <div className="flex flex-wrap items-center gap-4">
+              <Link
+                href={`/translate?brand=${currentBrand.id}&category=${selectedCategory === 'bottoms' ? 'bottoms' : 'tops'}`}
+                className="text-xs uppercase tracking-wider text-[#6E6D68] hover:text-[#121212] inline-flex items-center"
+              >
+                <Repeat className="w-3.5 h-3.5 mr-1.5" />
+                <span>Translate a Known Size</span>
+              </Link>
+              <Link
+                href="/dashboard"
+                className="text-xs uppercase tracking-wider text-[#6E6D68] hover:text-[#121212] inline-flex items-center"
+              >
+                <span>View All Brands Matrix</span>
+                <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
+              </Link>
+            </div>
           </div>
         </div>
       </motion.div>
+      )}
     </div>
   );
 }

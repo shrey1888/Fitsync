@@ -1,30 +1,34 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { BRANDS, SIZE_CHARTS, PRODUCTS } from '@/lib/data/brands';
-import { Brand, ClothingCategory, SizeChart } from '@/lib/types';
+import { Brand, ClothingCategory } from '@/lib/types';
 import { useFitSync } from '@/lib/store/useFitStore';
-import {
-  Search,
-  SlidersHorizontal,
-  Bookmark,
-  ExternalLink,
-  ArrowRight,
-  Ruler,
-  Check,
-  ShieldCheck,
-  Info,
-  Layers,
-} from 'lucide-react';
+import { Search, Bookmark, ArrowRight, Ruler, ShieldCheck, Repeat } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+const DEPT_ORDER = { menswear: 0, womenswear: 1, unisex: 2 } as const;
+const CATEGORY_ORDER = { tops: 0, bottoms: 1, outerwear: 2, dresses: 3 } as const;
+
 export default function BrandDirectory() {
-  const { savedBrands, toggleSaveBrand, recordBrandVisit, measurements } = useFitSync();
+  const { savedBrands, toggleSaveBrand, recordBrandVisit } = useFitSync();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedTendency, setSelectedTendency] = useState<string>('all');
   const [activeChartModalBrand, setActiveChartModalBrand] = useState<Brand | null>(null);
+  // Brand ids whose hero photo failed to load; they get a typographic fallback.
+  const [brokenImages, setBrokenImages] = useState<string[]>([]);
+
+  // Close the size chart modal with Escape.
+  useEffect(() => {
+    if (!activeChartModalBrand) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActiveChartModalBrand(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeChartModalBrand]);
 
   // Filter brands
   const filteredBrands = BRANDS.filter((brand) => {
@@ -118,12 +122,11 @@ export default function BrandDirectory() {
       </div>
 
       {/* Brand Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         {filteredBrands.map((brand) => {
           const isSaved = savedBrands.includes(brand.id);
           const tendency = getTendencyBadge(brand.sizingTendency);
           const brandProducts = PRODUCTS.filter((p) => p.brandId === brand.id);
-          const brandCharts = SIZE_CHARTS.filter((sc) => sc.brandId === brand.id);
 
           return (
             <motion.div
@@ -133,20 +136,33 @@ export default function BrandDirectory() {
               className="bg-white border border-[#E8E6DF] flex flex-col justify-between overflow-hidden group shadow-xs hover:border-[#121212]"
             >
               {/* Card Header & Visual */}
-              <div className="relative h-44 overflow-hidden bg-[#FAF9F6] border-b border-[#E8E6DF]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={brand.heroImage}
-                  alt={brand.name}
-                  className="w-full h-full object-cover grayscale group-hover:grayscale-0 group-hover:scale-105 transition-all duration-700"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+              <div className="relative h-44 overflow-hidden bg-[#2B2B2B] border-b border-[#E8E6DF]">
+                {brokenImages.includes(brand.id) ? (
+                  <div
+                    aria-hidden="true"
+                    className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#3A3A3A] to-[#121212] font-serif text-6xl font-black tracking-tighter text-white/15"
+                  >
+                    {brand.name.slice(0, 2).toUpperCase()}
+                  </div>
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={brand.heroImage}
+                    alt=""
+                    loading="lazy"
+                    onError={() => setBrokenImages((prev) => (prev.includes(brand.id) ? prev : [...prev, brand.id]))}
+                    className="w-full h-full object-cover grayscale group-hover:grayscale-0 group-focus-within:grayscale-0 group-hover:scale-105 transition-all duration-700"
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
 
                 {/* Bookmark button */}
                 <button
                   type="button"
                   onClick={() => toggleSaveBrand(brand.id)}
                   title={isSaved ? 'Remove from saved' : 'Save brand'}
+                  aria-label={isSaved ? `Remove ${brand.name} from saved` : `Save ${brand.name}`}
+                  aria-pressed={isSaved}
                   className={`absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
                     isSaved
                       ? 'bg-white text-[#121212]'
@@ -156,16 +172,14 @@ export default function BrandDirectory() {
                   <Bookmark className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`} />
                 </button>
 
-                {/* Brand Overlay Title */}
-                <div className="absolute bottom-3 left-4 right-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-serif text-2xl font-bold tracking-[0.1em] uppercase text-white">
-                      {brand.name}
-                    </h3>
-                    <span className="text-[10px] uppercase font-mono tracking-widest text-[#FAF9F6]/80">
-                      {brand.country} • est. {brand.founded}
-                    </span>
-                  </div>
+                {/* Brand Overlay Title — stacked so long names never collide with the country line */}
+                <div className="absolute bottom-3 left-4 right-14">
+                  <span className="block text-[10px] uppercase font-mono tracking-widest text-[#FAF9F6]/80 truncate">
+                    {brand.country} • est. {brand.founded}
+                  </span>
+                  <h3 className="font-serif text-2xl font-bold tracking-[0.1em] uppercase text-white leading-tight mt-0.5 break-words">
+                    {brand.name}
+                  </h3>
                 </div>
               </div>
 
@@ -173,14 +187,14 @@ export default function BrandDirectory() {
               <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
                 <div className="space-y-3">
                   {/* Tendency Badge */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span
-                      className={`text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 border ${tendency.class}`}
+                      className={`text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 border whitespace-nowrap ${tendency.class}`}
                     >
                       {tendency.label}
                     </span>
                     <span className="text-[10px] text-[#9B9A93] font-mono">
-                      {brandProducts.length} models
+                      {brandProducts.length} {brandProducts.length === 1 ? 'model' : 'models'}
                     </span>
                   </div>
 
@@ -219,14 +233,24 @@ export default function BrandDirectory() {
                     <ArrowRight className="w-3.5 h-3.5 ml-2 group-hover/btn:translate-x-1 transition-transform" />
                   </Link>
 
-                  <button
-                    type="button"
-                    onClick={() => setActiveChartModalBrand(brand)}
-                    className="w-full inline-flex items-center justify-center py-1.5 text-[11px] uppercase tracking-wider text-[#6E6D68] hover:text-[#121212] transition-colors"
-                  >
-                    <Ruler className="w-3 h-3 mr-1.5" />
-                    Inspect Size Chart
-                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveChartModalBrand(brand)}
+                      className="inline-flex items-center justify-center py-1.5 text-[10px] uppercase tracking-wider text-[#6E6D68] hover:text-[#121212] transition-colors"
+                    >
+                      <Ruler className="w-3 h-3 mr-1.5 shrink-0" />
+                      Size Chart
+                    </button>
+                    <Link
+                      href={`/translate?brand=${brand.id}`}
+                      title={`Already know your ${brand.name} size? See your size in every other brand.`}
+                      className="inline-flex items-center justify-center py-1.5 text-[10px] uppercase tracking-wider text-[#6E6D68] hover:text-[#121212] transition-colors"
+                    >
+                      <Repeat className="w-3 h-3 mr-1.5 shrink-0" />
+                      Translate Size
+                    </Link>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -237,8 +261,15 @@ export default function BrandDirectory() {
       {/* SIZE CHART MODAL INSPECTOR */}
       <AnimatePresence>
         {activeChartModalBrand && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+            onClick={() => setActiveChartModalBrand(null)}
+          >
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${activeChartModalBrand.name} size charts`}
+              onClick={(e) => e.stopPropagation()}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -248,6 +279,7 @@ export default function BrandDirectory() {
               <button
                 type="button"
                 onClick={() => setActiveChartModalBrand(null)}
+                aria-label="Close size charts"
                 className="absolute top-6 right-6 w-8 h-8 rounded-full border border-[#D8D6CF] flex items-center justify-center text-[#121212] hover:bg-[#121212] hover:text-white transition-colors"
               >
                 ✕
@@ -258,10 +290,10 @@ export default function BrandDirectory() {
                   <div className="flex items-center space-x-2">
                     <ShieldCheck className="w-4 h-4 text-emerald-800" />
                     <span className="text-[10px] uppercase font-mono tracking-widest text-[#9F8253]">
-                      Verified Brand Size Chart
+                      Brand Size Charts
                     </span>
                   </div>
-                  <h3 className="font-serif text-3xl font-bold uppercase tracking-tight text-[#121212] mt-1">
+                  <h3 className="font-serif text-3xl font-bold uppercase tracking-tight text-[#121212] mt-1 pr-10">
                     {activeChartModalBrand.name} Specifications
                   </h3>
                   <p className="text-xs text-[#6E6D68] mt-1">
@@ -282,16 +314,33 @@ export default function BrandDirectory() {
 
                 {/* Size Table */}
                 <div className="space-y-4">
-                  {SIZE_CHARTS.filter((sc) => sc.brandId === activeChartModalBrand.id).map(
-                    (chart) => (
+                  {SIZE_CHARTS.filter((sc) => sc.brandId === activeChartModalBrand.id)
+                    .sort(
+                      (a, b) =>
+                        Number(a.isProductSpecific) - Number(b.isProductSpecific) ||
+                        DEPT_ORDER[a.gender] - DEPT_ORDER[b.gender] ||
+                        CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category]
+                    )
+                    .map((chart) => (
                       <div key={chart.id} className="border border-[#E8E6DF] bg-white">
                         <div className="bg-[#F3F1EC] px-4 py-2.5 border-b border-[#E8E6DF] flex items-center justify-between">
                           <span className="font-mono text-xs uppercase font-semibold text-[#121212]">
-                            {chart.category.toUpperCase()} — {chart.gender.toUpperCase()}
-                            {chart.isProductSpecific && ' (Product Specific Pattern)'}
+                            {chart.isProductSpecific
+                              ? `${PRODUCTS.find((p) => p.id === chart.productId)?.name ?? 'Product'} (Product Pattern)`
+                              : `${chart.category} — ${chart.gender}`}
                           </span>
-                          <span className="text-[10px] font-mono text-[#6E6D68]">
-                            Unit: Centimeters (CM)
+                          <span className="flex items-center gap-2 text-[10px] font-mono text-[#6E6D68]">
+                            <span
+                              title={chart.sourceNote}
+                              className={`px-1.5 py-0.5 border uppercase ${
+                                chart.isVerified
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                                  : 'border-amber-200 bg-amber-50 text-amber-900'
+                              }`}
+                            >
+                              {chart.isVerified ? 'Verified' : 'Approximate'}
+                            </span>
+                            CM
                           </span>
                         </div>
 
@@ -318,6 +367,7 @@ export default function BrandDirectory() {
                                 {chart.entries[0]?.garmentChest !== undefined && (
                                   <th className="p-3">Garment Chest Ease</th>
                                 )}
+                                {chart.lengthOptions && <th className="p-3">Leg Lengths</th>}
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-[#E8E6DF]">
@@ -354,20 +404,27 @@ export default function BrandDirectory() {
                                       {entry.garmentChest} cm
                                     </td>
                                   )}
+                                  {chart.lengthOptions && (
+                                    <td className="p-3 text-[#6E6D68]">
+                                      {chart.lengthOptions.map((l) => `L${l.label}`).join(' / ')}
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                         </div>
                       </div>
-                    )
-                  )}
+                    ))}
+                  <p className="text-[11px] text-[#6E6D68]">
+                    Coats &amp; jackets are sized on each brand&apos;s tops chart with an added layering allowance.
+                  </p>
                 </div>
 
                 {/* Bottom modal CTA */}
-                <div className="pt-4 flex items-center justify-between border-t border-[#E8E6DF]">
+                <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-[#E8E6DF]">
                   <span className="text-xs text-[#6E6D68]">
-                    Source: {activeChartModalBrand.name} Verified Production Specifications
+                    Source: {activeChartModalBrand.name} published size guides
                   </span>
                   <Link
                     href={`/finder?brand=${activeChartModalBrand.id}`}

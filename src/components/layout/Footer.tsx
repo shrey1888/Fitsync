@@ -70,6 +70,11 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/translate" className="hover:text-white transition-colors">
+                  Cross-Brand Size Translator
+                </Link>
+              </li>
+              <li>
                 <Link href="/brands" className="hover:text-white transition-colors">
                   Brand Discrepancy Index
                 </Link>

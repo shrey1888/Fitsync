@@ -3,6 +3,7 @@ import {
   Brand,
   ClothingCategory,
   DimensionBreakdown,
+  GenderCategory,
   Product,
   RecommendationResult,
   SizeChart,
@@ -17,114 +18,150 @@ interface EngineOptions {
   measurements: BodyMeasurements;
 }
 
-export function recommendSize(options: EngineOptions): RecommendationResult {
+export interface ChartResolution {
+  chart: SizeChart;
+  /** Human-readable note when the chart was borrowed from another category or department. */
+  note?: string;
+}
+
+const CATEGORY_LABEL: Record<ClothingCategory, string> = {
+  tops: 'tops',
+  bottoms: 'bottoms',
+  outerwear: 'outerwear',
+  dresses: 'dresses',
+};
+
+/** Unisex garments follow menswear grading at every brand in the catalogue. */
+export const chartGenderFor = (gender: GenderCategory | undefined): Exclude<GenderCategory, 'unisex'> =>
+  gender === 'womenswear' ? 'womenswear' : 'menswear';
+
+const findBrandChart = (brandId: string, category: ClothingCategory, gender: GenderCategory) =>
+  SIZE_CHARTS.find(
+    (sc) => sc.brandId === brandId && sc.category === category && sc.gender === gender && !sc.isProductSpecific
+  );
+
+/**
+ * Picks the size chart for a brand/category/department.
+ *
+ * Only ever returns a chart that belongs to the requested brand. (Previously a
+ * missing chart silently fell back to the first chart in the catalogue, so e.g.
+ * Levi's tops were sized with Zara's chart and every brand's outerwear used
+ * Zara's tops chart.) Returns null when the brand has nothing usable.
+ */
+export function resolveChart(
+  brandId: string,
+  category: ClothingCategory,
+  gender: GenderCategory | undefined,
+  productId?: string
+): ChartResolution | null {
+  if (productId) {
+    const productChart = SIZE_CHARTS.find((sc) => sc.productId === productId && sc.category === category);
+    if (productChart) return { chart: productChart };
+  }
+
+  const dept = chartGenderFor(gender);
+  const brandName = BRANDS.find((b) => b.id === brandId)?.name ?? brandId;
+
+  const direct = findBrandChart(brandId, category, dept);
+  if (direct) return { chart: direct };
+
+  // Jackets, coats and dresses are graded on the same body chart as tops.
+  if (category === 'outerwear' || category === 'dresses') {
+    const tops = findBrandChart(brandId, 'tops', dept);
+    if (tops) {
+      return {
+        chart: tops,
+        note: `${brandName} grades ${CATEGORY_LABEL[category]} on its tops body chart; a layering allowance has been applied.`,
+      };
+    }
+  }
+
+  const otherDept = dept === 'menswear' ? 'womenswear' : 'menswear';
+  const other = findBrandChart(brandId, category, otherDept);
+  if (other) {
+    return {
+      chart: other,
+      note: `${brandName} has no ${dept} ${CATEGORY_LABEL[category]} chart on file, so ${otherDept} grading was used.`,
+    };
+  }
+
+  return null;
+}
+
+const humanize = (s: string) => s.replace(/_/g, ' ');
+
+/** "Zara" -> "Zara's", "Levi's" -> "Levi's" (not "Levi's's"). */
+export const possessive = (name: string) => (/'s$/i.test(name) ? name : `${name}'s`);
+
+export function recommendSize(options: EngineOptions): RecommendationResult | null {
   const { brandId, category, productId, measurements } = options;
 
-  // 1. Resolve Brand
-  const brand = BRANDS.find((b) => b.id === brandId) || {
-    id: brandId,
-    slug: brandId,
-    name: brandId.toUpperCase(),
-    country: 'International',
-    tagline: 'Global fashion standard',
-    sizingPhilosophy: 'Standard sizing grading',
-    sizingTendency: 'true_to_size',
-    sizingNote: 'Standard retail ease',
-    categories: [category],
-    heroImage: '',
-    website: '',
-    founded: 2000,
-  };
+  const brand: Brand | undefined = BRANDS.find((b) => b.id === brandId);
+  if (!brand) return null;
 
-  // 2. Resolve Product if specified
-  const product: Product | undefined = productId
-    ? PRODUCTS.find((p) => p.id === productId)
-    : undefined;
+  const product: Product | undefined = productId ? PRODUCTS.find((p) => p.id === productId) : undefined;
 
-  // 3. Resolve Size Chart (Product-specific chart takes priority over general brand chart)
-  let activeChart: SizeChart | undefined;
-
-  if (productId) {
-    activeChart = SIZE_CHARTS.find(
-      (sc) => sc.productId === productId && sc.category === category
-    );
-  }
-
-  if (!activeChart) {
-    activeChart = SIZE_CHARTS.find(
-      (sc) =>
-        sc.brandId === brandId &&
-        sc.category === category &&
-        sc.gender === (measurements.gender || 'menswear') &&
-        !sc.isProductSpecific
-    );
-  }
-
-  // Fallback to any brand chart for this category
-  if (!activeChart) {
-    activeChart = SIZE_CHARTS.find(
-      (sc) => sc.brandId === brandId && sc.category === category
-    );
-  }
-
-  // Safety fallback if brand has no specific chart
-  if (!activeChart) {
-    activeChart = SIZE_CHARTS.find((sc) => sc.category === category) || SIZE_CHARTS[0];
-  }
+  const resolution = resolveChart(brandId, category, measurements.gender, productId);
+  if (!resolution || resolution.chart.entries.length === 0) return null;
+  const activeChart = resolution.chart;
 
   const isProductSpecificData = !!activeChart.isProductSpecific;
   const missingNotices: string[] = [];
+  const isUpper = category === 'tops' || category === 'outerwear' || category === 'dresses';
 
-  // Track missing measurements
-  if (!measurements.chest && (category === 'tops' || category === 'outerwear')) {
+  if (!measurements.chest && isUpper) {
     missingNotices.push('Chest measurement is missing (critical for tops)');
   }
   if (!measurements.waist && category === 'bottoms') {
     missingNotices.push('Waist measurement is missing (critical for bottoms)');
   }
-  if (!measurements.shoulder && (category === 'tops' || category === 'outerwear')) {
+  if (!measurements.shoulder && isUpper && activeChart.entries.some((e) => e.shoulderMin !== undefined)) {
     missingNotices.push('Shoulder width was estimated based on standard proportional grading');
   }
   if (!measurements.hip && category === 'bottoms') {
     missingNotices.push('Hip measurement was estimated based on waist proportion');
   }
 
-  // 4. Calculate Suitability Score for each size entry
+  // Layering allowance: a coat goes over a shirt or knit, so aim a little bigger.
+  const layeringOffset = category === 'outerwear' ? -2 : 0;
+
   interface ScoredEntry {
     entry: SizeChartEntry;
+    index: number;
     totalScore: number;
     breakdowns: DimensionBreakdown[];
     fitTension: number; // negative = too tight, 0 = neutral/ideal, positive = roomy
   }
 
-  const scoredEntries: ScoredEntry[] = activeChart.entries.map((entry) => {
+  // Each dimension is only scored when the chart actually provides a range for it,
+  // so missing data never shows up as an invented range in the breakdown table.
+  const scoredEntries: ScoredEntry[] = activeChart.entries.map((entry, index) => {
     const breakdowns: DimensionBreakdown[] = [];
     let weightedScoreSum = 0;
     let totalWeights = 0;
     let fitTensionSum = 0;
 
-    // A. CHEST (For Tops & Outerwear)
-    if (category === 'tops' || category === 'outerwear') {
-      const weight = category === 'tops' ? 0.45 : 0.40;
+    // A. CHEST (tops, outerwear, dresses)
+    if (isUpper && (entry.chestMin !== undefined || entry.garmentChest !== undefined)) {
+      const weight = category === 'outerwear' ? 0.4 : 0.45;
       totalWeights += weight;
 
       const chestVal = measurements.chest || (measurements.gender === 'womenswear' ? 88 : 96);
-      const min = entry.chestMin ?? (entry.garmentChest ? entry.garmentChest - 8 : 90);
-      const max = entry.chestMax ?? (entry.garmentChest ? entry.garmentChest - 2 : 96);
+      const min = entry.chestMin ?? entry.garmentChest! - 8;
+      const max = entry.chestMax ?? entry.garmentChest! - 2;
       const target = (min + max) / 2;
 
-      // Adjust target by fit preference
       let prefOffset = 0;
       if (measurements.fitPreference === 'slim') prefOffset = -1.5;
       if (measurements.fitPreference === 'relaxed') prefOffset = +2.5;
       if (measurements.fitPreference === 'oversized') prefOffset = +4.5;
 
-      const effectiveTarget = target + prefOffset;
+      const effectiveTarget = target + prefOffset + layeringOffset;
       const delta = chestVal - effectiveTarget;
 
-      let dimScore = 100;
-      let status: DimensionBreakdown['status'] = 'perfect';
-      let feedback = 'Ideal chest drape and armscye freedom.';
+      let dimScore: number;
+      let status: DimensionBreakdown['status'];
+      let feedback: string;
 
       if (chestVal < min - 2) {
         status = 'too_large';
@@ -165,19 +202,19 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
       weightedScoreSum += dimScore * weight;
     }
 
-    // B. SHOULDER WIDTH (For Tops & Outerwear)
-    if ((category === 'tops' || category === 'outerwear') && (entry.shoulderMin || measurements.shoulder)) {
-      const weight = category === 'tops' ? 0.30 : 0.35;
+    // B. SHOULDER WIDTH (tops, outerwear) — only when the chart lists shoulders
+    if (isUpper && entry.shoulderMin !== undefined) {
+      const weight = category === 'outerwear' ? 0.35 : 0.3;
       totalWeights += weight;
 
-      const shoulderVal = measurements.shoulder || 44;
-      const min = entry.shoulderMin ?? (entry.chestMin ? entry.chestMin * 0.46 : 42);
+      const shoulderVal = measurements.shoulder || (measurements.gender === 'womenswear' ? 39 : 44);
+      const min = entry.shoulderMin;
       const max = entry.shoulderMax ?? min + 2;
       const target = (min + max) / 2;
       const delta = shoulderVal - target;
 
-      let dimScore = 100;
-      let status: DimensionBreakdown['status'] = 'perfect';
+      let dimScore: number;
+      let status: DimensionBreakdown['status'];
       let feedback = 'Shoulder seam sits precisely at the acromion bone.';
 
       if (shoulderVal > max + 2) {
@@ -218,14 +255,14 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
       weightedScoreSum += dimScore * weight;
     }
 
-    // C. WAIST (For Bottoms, Tops, Outerwear)
-    const waistVal = measurements.waist || (measurements.gender === 'womenswear' ? 70 : 82);
-    if (category === 'bottoms' || entry.waistMin || category === 'tops') {
-      const weight = category === 'bottoms' ? 0.50 : 0.15;
+    // C. WAIST (bottoms primarily; tops when the chart lists it)
+    if (entry.waistMin !== undefined || entry.garmentWaist !== undefined) {
+      const waistVal = measurements.waist || (measurements.gender === 'womenswear' ? 70 : 82);
+      const weight = category === 'bottoms' ? 0.5 : 0.15;
       totalWeights += weight;
 
-      const min = entry.waistMin ?? (entry.garmentWaist ? entry.garmentWaist - 2 : 78);
-      const max = entry.waistMax ?? (entry.garmentWaist ? entry.garmentWaist + 2 : min + 4);
+      const min = entry.waistMin ?? entry.garmentWaist! - 2;
+      const max = entry.waistMax ?? entry.garmentWaist! + 2;
       const target = (min + max) / 2;
 
       let prefOffset = 0;
@@ -235,14 +272,15 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
       }
 
       const delta = waistVal - (target + prefOffset);
-      let dimScore = 100;
-      let status: DimensionBreakdown['status'] = 'perfect';
+      let dimScore: number;
+      let status: DimensionBreakdown['status'];
       let feedback = 'Comfortable waistband sitting without cutting into waist.';
 
       if (waistVal > max + 2) {
         status = 'too_tight';
         dimScore = Math.max(10, 100 - (waistVal - max) * 20);
-        feedback = category === 'bottoms' ? 'Waistband will pinch tightly and restrict breathing.' : 'Torso pull around midsection.';
+        feedback =
+          category === 'bottoms' ? 'Waistband will pinch tightly and restrict breathing.' : 'Torso pull around midsection.';
         fitTensionSum -= 3;
       } else if (waistVal > max) {
         status = 'snug';
@@ -252,7 +290,8 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
       } else if (waistVal < min - 3) {
         status = 'too_large';
         dimScore = Math.max(35, 100 - (min - waistVal) * 14);
-        feedback = category === 'bottoms' ? 'Requires belt cinching; causes fabric bunching.' : 'Excess fabric slack around stomach.';
+        feedback =
+          category === 'bottoms' ? 'Requires belt cinching; causes fabric bunching.' : 'Excess fabric slack around stomach.';
         fitTensionSum += 2;
       } else if (waistVal < min) {
         status = 'roomy';
@@ -277,19 +316,19 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
       weightedScoreSum += dimScore * weight;
     }
 
-    // D. HIP (Primarily Bottoms)
-    if (category === 'bottoms') {
+    // D. HIP (bottoms)
+    if (category === 'bottoms' && entry.hipMin !== undefined) {
       const weight = 0.35;
       totalWeights += weight;
 
       const hipVal = measurements.hip || (measurements.waist ? measurements.waist + 16 : 98);
-      const min = entry.hipMin ?? 94;
+      const min = entry.hipMin;
       const max = entry.hipMax ?? min + 4;
       const target = (min + max) / 2;
       const delta = hipVal - target;
 
-      let dimScore = 100;
-      let status: DimensionBreakdown['status'] = 'perfect';
+      let dimScore: number;
+      let status: DimensionBreakdown['status'];
       let feedback = 'Clean seat drape with proper rise comfort.';
 
       if (hipVal > max + 2) {
@@ -330,28 +369,25 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
       weightedScoreSum += dimScore * weight;
     }
 
-    // E. INSEAM / HEIGHT (For Bottoms / Long Garments)
-    if (category === 'bottoms' && measurements.inseam) {
+    // E. INSEAM (bottoms with per-size inseam ranges)
+    if (category === 'bottoms' && entry.inseamMin !== undefined && measurements.inseam) {
       const weight = 0.15;
       totalWeights += weight;
       const inseamVal = measurements.inseam;
-      const min = entry.inseamMin ?? 78;
-      const max = entry.inseamMax ?? 84;
+      const min = entry.inseamMin;
+      const max = entry.inseamMax ?? min + 6;
       const target = (min + max) / 2;
       const delta = inseamVal - target;
 
       let status: DimensionBreakdown['status'] = 'perfect';
       let feedback = 'Clean break at the footwear collar.';
-
       if (inseamVal > max + 3) {
-        status = 'too_tight'; // represents too short for user
+        status = 'too_tight'; // leg too short for the user
         feedback = 'Cropped ankle exposure; short inseam length.';
       } else if (inseamVal < min - 3) {
-        status = 'too_large'; // represents too long for user
+        status = 'too_large'; // leg too long for the user
         feedback = 'Full fabric stacking over shoes; may require tailor hemming.';
       }
-
-      const dimScore = Math.max(60, 100 - Math.abs(delta) * 4);
 
       breakdowns.push({
         dimension: 'Inseam',
@@ -363,26 +399,58 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
         weight,
       });
 
-      weightedScoreSum += dimScore * weight;
+      weightedScoreSum += Math.max(60, 100 - Math.abs(delta) * 4) * weight;
     }
 
     const totalScore = totalWeights > 0 ? weightedScoreSum / totalWeights : 70;
 
     return {
       entry,
+      index,
       totalScore: Math.round(totalScore * 10) / 10,
       breakdowns,
       fitTension: fitTensionSum,
     };
   });
 
-  // Sort by highest suitability score
-  scoredEntries.sort((a, b) => b.totalScore - a.totalScore);
+  // Highest suitability first; ties go to the smaller size (chart order).
+  const ranked = [...scoredEntries].sort((a, b) => b.totalScore - a.totalScore || a.index - b.index);
 
-  const bestMatch = scoredEntries[0];
-  const secondBest = scoredEntries[1];
+  const bestMatch = ranked[0];
+  const secondBest = ranked[1];
 
-  // Derive confidence level
+  // Leg length for denim-style charts (Levi's W32 / L32).
+  let recommendedLength: string | undefined;
+  const breakdowns = [...bestMatch.breakdowns];
+  if (category === 'bottoms' && activeChart.lengthOptions?.length && measurements.inseam) {
+    const inseamVal = measurements.inseam;
+    const best = activeChart.lengthOptions.reduce((acc, opt) =>
+      Math.abs(opt.inseam - inseamVal) < Math.abs(acc.inseam - inseamVal) ? opt : acc
+    );
+    recommendedLength = best.label;
+    const delta = Math.round((inseamVal - best.inseam) * 10) / 10;
+
+    let status: DimensionBreakdown['status'] = 'perfect';
+    let feedback = `L${best.label} gives a clean break at the shoe.`;
+    if (delta > 3) {
+      status = 'too_tight';
+      feedback = `Even L${best.label} sits above the ankle; look for a longer length.`;
+    } else if (delta < -3) {
+      status = 'too_large';
+      feedback = `L${best.label} will stack over your shoes; plan for a hem.`;
+    }
+
+    breakdowns.push({
+      dimension: 'Inseam',
+      userMeasurement: inseamVal,
+      brandRange: { min: best.inseam - 2.5, max: best.inseam + 2.5, target: best.inseam },
+      delta,
+      status,
+      feedback,
+      weight: 0,
+    });
+  }
+
   let confidenceScore = Math.min(99, Math.max(45, Math.round(bestMatch.totalScore)));
   if (missingNotices.length > 0) {
     confidenceScore = Math.max(50, confidenceScore - missingNotices.length * 8);
@@ -392,34 +460,34 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
   if (confidenceScore < 72) confidenceLevel = 'Low';
   else if (confidenceScore < 85) confidenceLevel = 'Moderate';
 
-  // Determine alternative size recommendation
+  // Alternative size recommendation
   let alternativeSize: RecommendationResult['alternativeSize'];
   if (secondBest) {
-    const bestIndex = activeChart.entries.findIndex((e) => e.size === bestMatch.entry.size);
-    const secondIndex = activeChart.entries.findIndex((e) => e.size === secondBest.entry.size);
-
-    if (secondIndex > bestIndex) {
-      // Sizing up
+    if (secondBest.index > bestMatch.index) {
       alternativeSize = {
         size: secondBest.entry.size,
         direction: 'size_up',
         reason:
           measurements.fitPreference === 'relaxed' || measurements.fitPreference === 'oversized'
             ? `Consider ${secondBest.entry.size} for an authentic streetwear drape or layering over mid-layers.`
+            : category === 'bottoms'
+            ? `Size up to ${secondBest.entry.size} for a more forgiving waistband and seat.`
             : `Size up to ${secondBest.entry.size} if you have broader shoulders or prefer an unconstricted drape.`,
       };
-    } else if (secondIndex < bestIndex) {
-      // Sizing down
+    } else if (secondBest.index < bestMatch.index) {
       alternativeSize = {
         size: secondBest.entry.size,
         direction: 'size_down',
-        reason: `Choose ${secondBest.entry.size} if you desire a sharper, form-fitting European taper.`,
+        reason:
+          category === 'bottoms'
+            ? `Choose ${secondBest.entry.size} for a closer waistband; rigid denim and stretch fabrics relax with wear.`
+            : `Choose ${secondBest.entry.size} if you want a sharper, closer-fitting silhouette.`,
       };
     }
   }
 
   // Assess fit character
-  let fitAssessment: RecommendationResult['fitAssessment'] = 'Natural Regular';
+  let fitAssessment: RecommendationResult['fitAssessment'];
   if (measurements.fitPreference === 'slim' || bestMatch.fitTension < -1) {
     fitAssessment = 'Fitted / Snug';
   } else if (measurements.fitPreference === 'oversized' || bestMatch.fitTension > 2) {
@@ -430,16 +498,16 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
     fitAssessment = 'True Tailored';
   }
 
-  // Generate transparent editorial reasoning
+  // Transparent editorial reasoning
   const brandName = brand.name;
   const sizeName = bestMatch.entry.size;
-  let summaryReason = '';
+  let summaryReason: string;
 
-  if (category === 'tops' || category === 'outerwear') {
-    const chestBreakdown = bestMatch.breakdowns.find((b) => b.dimension === 'Chest');
-    const shoulderBreakdown = bestMatch.breakdowns.find((b) => b.dimension === 'Shoulder');
+  if (isUpper) {
+    const chestBreakdown = breakdowns.find((b) => b.dimension === 'Chest');
+    const shoulderBreakdown = breakdowns.find((b) => b.dimension === 'Shoulder');
 
-    summaryReason = `${brandName}'s ${sizeName} accommodates your ${chestBreakdown?.userMeasurement ?? measurements.chest}cm chest with ${
+    summaryReason = `${possessive(brandName)} ${sizeName} accommodates your ${chestBreakdown?.userMeasurement ?? measurements.chest}cm chest with ${
       measurements.fitPreference === 'slim' ? 'tailored European contours' : 'ideal ergonomic ease'
     }.`;
 
@@ -447,10 +515,9 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
       summaryReason += ` Shoulder alignment is exact at ${shoulderBreakdown.userMeasurement}cm.`;
     }
   } else {
-    const waistBreakdown = bestMatch.breakdowns.find((b) => b.dimension === 'Waist');
-    const hipBreakdown = bestMatch.breakdowns.find((b) => b.dimension === 'Hip');
-
-    summaryReason = `${brandName} size ${sizeName} provides a precise ${
+    const waistBreakdown = breakdowns.find((b) => b.dimension === 'Waist');
+    const sizeLabel = recommendedLength ? `${sizeName} × L${recommendedLength}` : sizeName;
+    summaryReason = `${brandName} size ${sizeLabel} provides a precise ${
       waistBreakdown?.userMeasurement ?? measurements.waist
     }cm waistband fit with natural seat ease around the hips.`;
   }
@@ -459,22 +526,27 @@ export function recommendSize(options: EngineOptions): RecommendationResult {
     ? `Calculated using verified product-specific garment patterns. Accounting for intentional fabric ease (+${
         measurements.fitPreference === 'oversized' ? '12-16cm' : '4-8cm'
       }) beyond raw skin-to-tape dimensions.`
-    : `Calculated against ${brandName}'s master anatomical grading charts, calibrated with ${brand.sizingTendency.replace('_', ' ')} ease curves.`;
+    : `Calculated against ${possessive(brandName)} master anatomical grading charts, calibrated with ${humanize(
+        brand.sizingTendency
+      )} ease curves.`;
 
   return {
     brand,
     category,
     product,
     recommendedSize: sizeName,
+    recommendedLength,
     confidenceScore,
     confidenceLevel,
     alternativeSize,
     fitAssessment,
     summaryReason,
     easeExplanation,
-    dimensionBreakdowns: bestMatch.breakdowns,
+    dimensionBreakdowns: breakdowns,
     missingMeasurementsNotice: missingNotices.length > 0 ? missingNotices : undefined,
     isProductSpecificData,
+    chartId: activeChart.id,
+    chartNote: resolution.note,
     calculatedAt: '',
   };
 }
@@ -483,11 +555,7 @@ export function batchRecommendSizes(
   measurements: BodyMeasurements,
   category: ClothingCategory = 'tops'
 ): RecommendationResult[] {
-  return BRANDS.map((brand) =>
-    recommendSize({
-      brandId: brand.id,
-      category,
-      measurements,
-    })
+  return BRANDS.map((brand) => recommendSize({ brandId: brand.id, category, measurements })).filter(
+    (r): r is RecommendationResult => r !== null
   );
 }

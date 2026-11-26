@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useFitSync } from '@/lib/store/useFitStore';
-import { Sparkles, SlidersHorizontal, ArrowRight, User } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -11,6 +11,7 @@ export default function Navbar() {
 
   const navLinks = [
     { label: 'Size Finder', href: '/finder' },
+    { label: 'Translate', href: '/translate' },
     { label: 'Brand Directory', href: '/brands' },
     { label: 'How It Works', href: '/#how-it-works' },
     { label: 'Dashboard', href: '/dashboard' },
@@ -35,15 +36,16 @@ export default function Navbar() {
             </div>
           </Link>
 
-          {/* Nav links */}
-          <nav className="hidden md:flex items-center space-x-8">
+          {/* Nav links (desktop) */}
+          <nav className="hidden xl:flex items-center space-x-7" aria-label="Primary">
             {navLinks.map((link) => {
               const isActive = pathname === link.href;
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`text-xs uppercase tracking-[0.18em] transition-all duration-200 py-1 relative ${
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`text-xs uppercase tracking-[0.18em] whitespace-nowrap transition-all duration-200 py-1 relative ${
                     isActive
                       ? 'text-[#121212] font-semibold'
                       : 'text-[#6E6D68] hover:text-[#121212]'
@@ -63,13 +65,14 @@ export default function Navbar() {
             {isLoaded && measurements ? (
               <Link
                 href="/dashboard"
+                title="Chest / waist on your saved profile"
                 className="hidden sm:inline-flex items-center space-x-2 text-xs border border-[#E8E6DF] bg-white px-3 py-2 text-[#121212] hover:border-[#121212] transition-colors"
               >
                 <span className="w-2 h-2 rounded-full bg-emerald-700 animate-pulse" />
-                <span className="font-mono text-[11px] text-[#6E6D68]">
+                <span className="font-mono text-[11px] text-[#6E6D68] whitespace-nowrap">
                   {measurements.chest}cm / {measurements.waist}cm
                 </span>
-                <span className="text-[#121212] font-medium pl-1 border-l border-[#E8E6DF]">
+                <span className="hidden 2xl:inline text-[#121212] font-medium pl-1 border-l border-[#E8E6DF]">
                   Profile Ready
                 </span>
               </Link>
@@ -77,7 +80,7 @@ export default function Navbar() {
 
             <Link
               href="/onboarding"
-              className="inline-flex items-center justify-center px-4 py-2.5 sm:px-5 sm:py-2.5 text-xs uppercase tracking-[0.16em] bg-[#121212] text-[#FAF9F6] border border-[#121212] hover:bg-[#2B2B2B] transition-all duration-200 shadow-sm group"
+              className="inline-flex items-center justify-center whitespace-nowrap px-4 py-2.5 sm:px-5 sm:py-2.5 text-xs uppercase tracking-[0.16em] bg-[#121212] text-[#FAF9F6] border border-[#121212] hover:bg-[#2B2B2B] transition-all duration-200 shadow-sm group"
             >
               <span>{measurements ? 'Edit Profile' : 'Measure Once'}</span>
               <ArrowRight className="w-3.5 h-3.5 ml-2 group-hover:translate-x-0.5 transition-transform" />
@@ -85,6 +88,30 @@ export default function Navbar() {
           </div>
         </div>
       </div>
+
+      {/* Nav links (phones & tablets): a scrollable strip instead of hiding navigation entirely */}
+      <nav
+        className="xl:hidden border-t border-[#E8E6DF] overflow-x-auto"
+        aria-label="Primary"
+      >
+        <div className="flex items-center gap-6 px-4 sm:px-6 py-2.5 min-w-max">
+          {navLinks.map((link) => {
+            const isActive = pathname === link.href;
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={isActive ? 'page' : undefined}
+                className={`text-[11px] uppercase tracking-[0.16em] whitespace-nowrap py-0.5 border-b ${
+                  isActive ? 'text-[#121212] font-semibold border-[#121212]' : 'text-[#6E6D68] border-transparent'
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </header>
   );
 }
