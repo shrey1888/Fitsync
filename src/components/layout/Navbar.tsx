@@ -7,7 +7,7 @@ import { ArrowRight } from 'lucide-react';
 
 export default function Navbar() {
   const pathname = usePathname();
-  const { measurements, isLoaded } = useFitSync();
+  const { measurements, isDemoProfile, isLoaded } = useFitSync();
 
   const navLinks = [
     { label: 'Size Finder', href: '/finder' },
@@ -73,7 +73,7 @@ export default function Navbar() {
                   {measurements.chest}cm / {measurements.waist}cm
                 </span>
                 <span className="hidden 2xl:inline text-[#121212] font-medium pl-1 border-l border-[#E8E6DF]">
-                  Profile Ready
+                  {isDemoProfile ? 'Demo Profile' : 'Profile Ready'}
                 </span>
               </Link>
             ) : null}

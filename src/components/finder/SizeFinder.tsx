@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BRANDS, PRODUCTS, SIZE_CHARTS } from '@/lib/data/brands';
-import { Brand, ClothingCategory } from '@/lib/types';
+import { Brand, ClothingCategory, MeasurementUnit } from '@/lib/types';
 import { recommendSize, chartGenderFor, possessive } from '@/lib/sizing/engine';
 import { useFitSync, DEFAULT_MEASUREMENTS } from '@/lib/store/useFitStore';
 import {
@@ -24,6 +24,7 @@ const FINDER_CATEGORIES: { id: ClothingCategory; label: string }[] = [
   { id: 'tops', label: 'Tops & Shirts' },
   { id: 'bottoms', label: 'Pants, Denim & Trousers' },
   { id: 'outerwear', label: 'Coats & Jackets' },
+  { id: 'dresses', label: 'Dresses' },
 ];
 
 /**
@@ -58,13 +59,17 @@ function SizeFinderInner({
   initialBrandId: string;
   initialCategory: ClothingCategory;
 }) {
-  const { measurements, isLoaded, addRecommendationHistory, recordBrandVisit } = useFitSync();
+  const { measurements, isDemoProfile, isLoaded, addRecommendationHistory, recordBrandVisit } = useFitSync();
 
   const [selectedBrandId, setSelectedBrandId] = useState<string>(initialBrandId);
   const [selectedCategory, setSelectedCategory] = useState<ClothingCategory>(initialCategory);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
+  const [unit, setUnit] = useState<MeasurementUnit>('cm');
   const [copied, setCopied] = useState(false);
   const [hasSavedToHistory, setHasSavedToHistory] = useState(false);
+
+  const fmt = (cm: number) => (unit === 'cm' ? `${cm} cm` : `${Math.round((cm / 2.54) * 10) / 10} in`);
+  const fmtNum = (cm: number) => (unit === 'cm' ? `${cm}` : `${Math.round((cm / 2.54) * 10) / 10}`);
 
   const currentBrand = BRANDS.find((b) => b.id === selectedBrandId) || BRANDS[0];
 
@@ -83,13 +88,20 @@ function SizeFinderInner({
     setHasSavedToHistory(false);
   };
 
-  // Products available for this brand and category
-  const availableProducts = PRODUCTS.filter(
-    (p) => p.brandId === selectedBrandId && p.category === selectedCategory
-  );
-
   const currentMeasurements = measurements ?? DEFAULT_MEASUREMENTS;
   const userDept = chartGenderFor(currentMeasurements.gender);
+
+  // Products matching the brand, category, and user's department (fallback to all if none)
+  const deptProducts = PRODUCTS.filter(
+    (p) =>
+      p.brandId === selectedBrandId &&
+      p.category === selectedCategory &&
+      (p.gender === userDept || p.gender === 'unisex')
+  );
+  const availableProducts =
+    deptProducts.length > 0
+      ? deptProducts
+      : PRODUCTS.filter((p) => p.brandId === selectedBrandId && p.category === selectedCategory);
 
   const result = recommendSize({
     brandId: selectedBrandId,
@@ -132,14 +144,22 @@ function SizeFinderInner({
 
   const handleCopySummary = async () => {
     if (!result) return;
-    const text = `FITSYNC Recommendation:\nBrand: ${currentBrand.name}\nSize: ${sizeLabel}\nFit: ${result.fitAssessment}\nConfidence: ${result.confidenceLevel} (${result.confidenceScore}%)\nMeasurements: Chest ${currentMeasurements.chest}cm, Waist ${currentMeasurements.waist}cm.`;
+    const text = `FITSYNC Recommendation:\nBrand: ${currentBrand.name}\nSize: ${sizeLabel}\nFit: ${result.fitAssessment}\nConfidence: ${result.confidenceLevel} (${result.confidenceScore}%)\nMeasurements: Chest ${fmt(currentMeasurements.chest)}, Waist ${fmt(currentMeasurements.waist)}.`;
     try {
-      // navigator.clipboard is undefined on plain-http origins other than localhost.
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      window.prompt('Copy your recommendation:', text);
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -151,13 +171,13 @@ function SizeFinderInner({
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-700 animate-pulse shrink-0" />
           <div>
             <span className="text-[10px] uppercase font-mono tracking-widest text-[#9F8253]">
-              Active Body Calibration
+              {isDemoProfile ? 'Demo Profile (Sample Measurements)' : 'Active Body Calibration'}
             </span>
             <div className="flex flex-wrap gap-x-3 text-xs font-mono text-[#121212] font-medium mt-0.5">
-              <span>Chest: {currentMeasurements.chest}cm</span>
-              <span>Waist: {currentMeasurements.waist}cm</span>
-              <span>Shoulder: {currentMeasurements.shoulder}cm</span>
-              <span>Height: {currentMeasurements.height}cm</span>
+              <span>Chest: {fmt(currentMeasurements.chest)}</span>
+              <span>Waist: {fmt(currentMeasurements.waist)}</span>
+              <span>Shoulder: {fmt(currentMeasurements.shoulder)}</span>
+              <span>Height: {fmt(currentMeasurements.height)}</span>
               <span className="text-[#9F8253] uppercase">
                 [{currentMeasurements.fitPreference} fit]
               </span>
@@ -165,13 +185,29 @@ function SizeFinderInner({
           </div>
         </div>
 
-        <Link
-          href="/onboarding"
-          className="inline-flex items-center text-xs uppercase tracking-wider text-[#121212] border border-[#D8D6CF] px-3.5 py-1.5 hover:bg-[#121212] hover:text-white transition-colors self-start sm:self-center"
-        >
-          <Sliders className="w-3.5 h-3.5 mr-1.5" />
-          Edit Measurements
-        </Link>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="inline-flex border border-[#E8E6DF] p-0.5 bg-[#FAF9F6]">
+            {(['cm', 'inch'] as const).map((u) => (
+              <button
+                key={u}
+                type="button"
+                onClick={() => setUnit(u)}
+                className={`px-2.5 py-1 text-[10px] uppercase font-mono transition-all ${
+                  unit === u ? 'bg-[#121212] text-white' : 'text-[#6E6D68] hover:text-[#121212]'
+                }`}
+              >
+                {u}
+              </button>
+            ))}
+          </div>
+          <Link
+            href="/onboarding"
+            className="inline-flex items-center text-xs uppercase tracking-wider text-[#121212] border border-[#D8D6CF] px-3.5 py-1.5 hover:bg-[#121212] hover:text-white transition-colors"
+          >
+            <Sliders className="w-3.5 h-3.5 mr-1.5" />
+            {isDemoProfile ? 'Enter My Measurements' : 'Edit Measurements'}
+          </Link>
+        </div>
       </div>
 
       {/* 3-Step Selection Grid */}
@@ -471,10 +507,10 @@ function SizeFinderInner({
                     <tr key={dim.dimension} className="hover:bg-[#FAF9F6] transition-colors">
                       <td className="p-3 font-bold text-[#121212]">{dim.dimension}</td>
                       <td className="p-3 font-semibold text-[#121212]">
-                        {dim.userMeasurement} cm
+                        {fmt(dim.userMeasurement)}
                       </td>
                       <td className="p-3 text-[#6E6D68]">
-                        {dim.brandRange.min} – {dim.brandRange.max} cm
+                        {fmtNum(dim.brandRange.min)} – {fmt(dim.brandRange.max)}
                       </td>
                       <td className="p-3">
                         <span

@@ -105,6 +105,7 @@ export default function BrandDirectory() {
             { id: 'tops', label: 'Tops & Shirts' },
             { id: 'bottoms', label: 'Pants & Denim' },
             { id: 'outerwear', label: 'Outerwear & Coats' },
+            { id: 'dresses', label: 'Dresses' },
           ].map((cat) => (
             <button
               key={cat.id}

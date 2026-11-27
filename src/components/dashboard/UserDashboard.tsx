@@ -15,8 +15,6 @@ import {
   Database,
   Lock,
   Trash2,
-  Copy,
-  Check,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -25,7 +23,6 @@ export default function UserDashboard() {
 
   const [activeMatrixCategory, setActiveMatrixCategory] = useState<ClothingCategory>('tops');
   const [showSqlModal, setShowSqlModal] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
 
   const activeMeasurements: BodyMeasurements = measurements ?? DEFAULT_MEASUREMENTS;
 
@@ -39,37 +36,6 @@ export default function UserDashboard() {
       })
     )
     .filter((rec): rec is RecommendationResult => rec !== null);
-
-  const sqlSchemaSnippet = `-- Supabase RLS Schema for FITSYNC
-CREATE TABLE public.body_measurements (
-  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id uuid REFERENCES auth.users ON DELETE CASCADE NOT NULL,
-  height numeric(5,2) NOT NULL,
-  chest numeric(5,2) NOT NULL,
-  waist numeric(5,2) NOT NULL,
-  shoulder numeric(5,2),
-  hip numeric(5,2),
-  inseam numeric(5,2),
-  fit_preference text DEFAULT 'regular',
-  unit text DEFAULT 'cm',
-  updated_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE public.body_measurements ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can access own measurements"
-  ON public.body_measurements FOR ALL
-  USING (auth.uid() = user_id);`;
-
-  const copySql = async () => {
-    try {
-      await navigator.clipboard.writeText(sqlSchemaSnippet);
-      setCopiedSql(true);
-      setTimeout(() => setCopiedSql(false), 2000);
-    } catch {
-      // Clipboard API unavailable (non-secure origin); the SQL block is selectable instead.
-    }
-  };
 
   if (!isLoaded) {
     return (
@@ -206,6 +172,7 @@ CREATE POLICY "Users can access own measurements"
               { id: 'tops', label: 'Tops' },
               { id: 'bottoms', label: 'Bottoms' },
               { id: 'outerwear', label: 'Coats' },
+              { id: 'dresses', label: 'Dresses' },
             ].map((cat) => (
               <button
                 key={cat.id}
@@ -425,10 +392,10 @@ CREATE POLICY "Users can access own measurements"
         </div>
       </div>
 
-      {/* SUPABASE SQL & CLOUD CONNECTION MODAL */}
+      {/* PRIVACY & STORAGE STATUS MODAL */}
       {showSqlModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white border border-[#121212] max-w-2xl w-full p-6 sm:p-8 relative shadow-2xl space-y-5">
+          <div className="bg-white border border-[#121212] max-w-lg w-full p-6 sm:p-8 relative shadow-2xl space-y-5">
             <button
               type="button"
               onClick={() => setShowSqlModal(false)}
@@ -439,43 +406,25 @@ CREATE POLICY "Users can access own measurements"
 
             <div>
               <span className="text-[10px] uppercase font-mono tracking-widest text-[#9F8253]">
-                Database Architecture
+                Privacy &amp; Sync Status
               </span>
               <h3 className="font-serif text-2xl font-bold text-[#121212] mt-1">
-                Supabase & Row Level Security Setup
+                Private Measurement Vault
               </h3>
-              <p className="text-xs text-[#6E6D68] mt-1">
-                FITSYNC is configured with an offline-first storage engine that syncs to Supabase
-                when credentials are provided in your environment variables.
+              <p className="text-xs text-[#6E6D68] mt-1 leading-relaxed">
+                {isSupabaseConfigured
+                  ? 'Your profile is connected to cloud storage with Row Level Security so only your account can access your measurements.'
+                  : 'Your measurements are stored privately in your browser on this device. No personal dimensions are sent to external servers.'}
               </p>
             </div>
 
-            <div className="bg-[#FAF9F6] border border-[#E8E6DF] p-4 text-xs font-mono space-y-2">
-              <span className="text-[10px] uppercase text-[#6E6D68] block">Required .env.local:</span>
-              <div className="bg-white p-2.5 border border-[#E8E6DF] select-all">
-                NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-                <br />
-                NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-medium text-[#121212]">
-                  PostgreSQL Tables & RLS Policies (Preview)
-                </span>
-                <button
-                  type="button"
-                  onClick={copySql}
-                  className="text-xs font-mono text-[#9F8253] hover:underline flex items-center gap-1"
-                >
-                  {copiedSql ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                  {copiedSql ? 'Copied SQL' : 'Copy Full SQL'}
-                </button>
-              </div>
-              <pre className="bg-[#121212] text-[#FAF9F6] p-4 text-[11px] font-mono overflow-x-auto max-h-48 leading-relaxed">
-                {sqlSchemaSnippet}
-              </pre>
+            <div className="bg-[#FAF9F6] border border-[#E8E6DF] p-4 text-xs space-y-1.5 text-[#4A4944]">
+              <span className="text-[10px] uppercase font-mono text-[#121212] font-semibold block">
+                Active Storage Mode
+              </span>
+              <p className="font-mono text-[11px]">
+                {isSupabaseConfigured ? 'Cloud Sync (Supabase RLS)' : 'Local Browser Vault (Private)'}
+              </p>
             </div>
 
             <div className="pt-2 flex justify-end">
@@ -484,7 +433,7 @@ CREATE POLICY "Users can access own measurements"
                 onClick={() => setShowSqlModal(false)}
                 className="px-5 py-2 text-xs uppercase tracking-wider bg-[#121212] text-white hover:bg-[#2B2B2B]"
               >
-                Close Inspector
+                Close
               </button>
             </div>
           </div>

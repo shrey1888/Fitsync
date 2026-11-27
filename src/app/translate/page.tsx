@@ -26,11 +26,12 @@ export default function TranslatePage() {
               Cross-Brand Size Translator
             </span>
             <h1 className="font-serif text-3xl sm:text-5xl font-light text-[#121212] tracking-tight">
-              Wear an S at H&amp;M? See your size everywhere.
+              Wear an M at Zara? See your size everywhere.
             </h1>
             <p className="text-xs text-[#6E6D68] max-w-lg mx-auto leading-relaxed">
-              Pick a brand and the size that fits you. FITSYNC reads that size&apos;s range off the brand&apos;s chart
-              and finds the matching size at every other brand.
+              Pick a category, brand, and the size that fits you. FITSYNC converts using
+              category-specific measurements (chest, shoulder, waist, hip, sleeve, and length)
+              against each brand&apos;s chart.
             </p>
           </div>
 

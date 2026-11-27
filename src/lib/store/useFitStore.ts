@@ -134,6 +134,7 @@ const sampleHistory = (): SavedRecommendation[] => [
 
 interface FitState {
   measurements: BodyMeasurements | null;
+  isDemoProfile: boolean;
   savedBrands: string[];
   recentBrands: string[];
   history: SavedRecommendation[];
@@ -144,6 +145,7 @@ interface FitState {
 // useSyncExternalStore always receives the same reference.
 const SERVER_STATE: FitState = {
   measurements: null,
+  isDemoProfile: true,
   savedBrands: ['zara', 'uniqlo', 'levis'],
   recentBrands: ['zara', 'hm', 'nike'],
   history: [],
@@ -201,10 +203,13 @@ function loadFromStorage(): FitState {
   const savedBrands = readJSON<string[]>(STORAGE_KEYS.SAVED_BRANDS);
   const recentBrands = readJSON<string[]>(STORAGE_KEYS.RECENT_BRANDS);
   const history = readJSON<SavedRecommendation[]>(STORAGE_KEYS.HISTORY);
+  const storedMeasurements = sanitizeMeasurements(readJSON(STORAGE_KEYS.MEASUREMENTS));
 
   return {
-    // First-time visitors get the reference profile so every screen has something to show.
-    measurements: sanitizeMeasurements(readJSON(STORAGE_KEYS.MEASUREMENTS)) ?? DEFAULT_MEASUREMENTS,
+    // First-time visitors get the reference profile so every screen has something to show,
+    // flagged as a demo profile until they save their own measurements.
+    measurements: storedMeasurements ?? DEFAULT_MEASUREMENTS,
+    isDemoProfile: storedMeasurements === null,
     savedBrands: Array.isArray(savedBrands) ? savedBrands : SERVER_STATE.savedBrands,
     recentBrands: Array.isArray(recentBrands) ? recentBrands : SERVER_STATE.recentBrands,
     history: Array.isArray(history) ? history : sampleHistory(),
@@ -264,7 +269,7 @@ async function saveMeasurements(newMeasurements: BodyMeasurements) {
     ...newMeasurements,
     lastUpdated: new Date().toISOString(),
   };
-  setState({ measurements: updated });
+  setState({ measurements: updated, isDemoProfile: false });
   writeJSON(STORAGE_KEYS.MEASUREMENTS, updated);
 
   // If Supabase is connected and user is logged in
@@ -334,6 +339,7 @@ export function useFitSync() {
 
   return {
     measurements: s.measurements,
+    isDemoProfile: s.isDemoProfile,
     isLoaded: s.isLoaded,
     hasMeasurements: Boolean(s.measurements && s.measurements.chest && s.measurements.waist),
     saveMeasurements,

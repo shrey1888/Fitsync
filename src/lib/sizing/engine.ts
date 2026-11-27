@@ -94,7 +94,24 @@ const humanize = (s: string) => s.replace(/_/g, ' ');
 export const possessive = (name: string) => (/'s$/i.test(name) ? name : `${name}'s`);
 
 export function recommendSize(options: EngineOptions): RecommendationResult | null {
-  const { brandId, category, productId, measurements } = options;
+  const { brandId, category, productId } = options;
+  const cleanNum = (v: number | undefined) =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+  const measurements: BodyMeasurements = {
+    ...options.measurements,
+    height: cleanNum(options.measurements.height),
+    weight:
+      typeof options.measurements.weight === 'number' &&
+      Number.isFinite(options.measurements.weight) &&
+      options.measurements.weight > 0
+        ? options.measurements.weight
+        : undefined,
+    chest: cleanNum(options.measurements.chest),
+    waist: cleanNum(options.measurements.waist),
+    shoulder: cleanNum(options.measurements.shoulder),
+    hip: cleanNum(options.measurements.hip),
+    inseam: cleanNum(options.measurements.inseam),
+  };
 
   const brand: Brand | undefined = BRANDS.find((b) => b.id === brandId);
   if (!brand) return null;
